@@ -22,6 +22,9 @@
      <Link>%(RecursiveDir)%(Filename)%(Extension)</Link>
     </Compile>
     <Compile Remove="Lidgren.Network\Lidgren.Network\obj\**\*.cs" />
+    <!-- Engine-owned shutdown fix; see Patches/README.md. -->
+    <Compile Remove="Lidgren.Network\Lidgren.Network\NetConnection.cs" />
+    <Compile Include="Patches\NetConnection.cs" />
   </ItemGroup>
 
   <Import Project="../MSBuild/Robust.Properties.targets" />
