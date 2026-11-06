@@ -39,7 +39,7 @@ internal sealed partial class Clyde
         private readonly HashSet<(EntityUid, SpatialMeshChunkKey)> _sceneKeys = new();
         private RenderTexture _opaque = default!, _accumulation = default!, _revealage = default!, _output = default!;
         private GLShaderProgram _forward = default!, _composite = default!;
-        private int _sampler, _fullscreenVao;
+        private int _sampler, _mipSampler, _fullscreenVao;
         private long _residentBytes;
         private bool _disposed;
         public IRenderTexture Target => _output;
@@ -57,6 +57,11 @@ internal sealed partial class Clyde
                 GL.SamplerParameter(_sampler, SamplerParameterName.TextureMagFilter, (int) TextureMagFilter.Nearest);
                 GL.SamplerParameter(_sampler, SamplerParameterName.TextureWrapS, (int) TextureWrapMode.ClampToEdge);
                 GL.SamplerParameter(_sampler, SamplerParameterName.TextureWrapT, (int) TextureWrapMode.ClampToEdge);
+                _mipSampler = GL.GenSampler();
+                GL.SamplerParameter(_mipSampler, SamplerParameterName.TextureMinFilter, (int) TextureMinFilter.NearestMipmapLinear);
+                GL.SamplerParameter(_mipSampler, SamplerParameterName.TextureMagFilter, (int) TextureMagFilter.Nearest);
+                GL.SamplerParameter(_mipSampler, SamplerParameterName.TextureWrapS, (int) TextureWrapMode.Repeat);
+                GL.SamplerParameter(_mipSampler, SamplerParameterName.TextureWrapT, (int) TextureWrapMode.Repeat);
                 Resize(size);
                 CreateShadowTarget();
                 owner.CheckGlError();
@@ -252,15 +257,8 @@ internal sealed partial class Clyde
                         if ((material.AlphaMode == SpatialAlphaMode.Transparent) == (pass != 0))
                         {
                             if (material.DoubleSided) GL.Disable(EnableCap.CullFace); else GL.Enable(EnableCap.CullFace);
-                            var texture = RenderHandle.ExtractTexture(material.Texture ?? _owner.GetStockTexture(Robust.Shared.Graphics.ClydeStockTexture.White), null, out var region);
-                            var uv = RenderHandle.WorldTextureBoundsToUV(texture, region);
-                            var inset = new Vector2(0.5f / texture.Width, 0.5f / texture.Height);
-                            _forward.SetUniform("uUvRect", new Vector4(uv.Left + inset.X, uv.Bottom + inset.Y,
-                                Math.Max(0, uv.Width - inset.X * 2), Math.Max(0, uv.Height - inset.Y * 2)));
-                            BindTexture(0, texture);
-                            _forward.SetUniform("uRepeat", material.Repeat); _forward.SetUniform("uColor", material.Color);
+                            SetMaterialTexture(_forward, material);
                             _forward.SetUniform("uEmission", material.Emission);
-                            _forward.SetUniform("uCutoff", material.AlphaMode == SpatialAlphaMode.Cutout ? material.AlphaCutoff : 0);
                             GL.DrawElements(PrimitiveType.Triangles, (end - i) * 6, DrawElementsType.UnsignedInt, (IntPtr) (first.FirstIndex * sizeof(int)));
                             draws++;
                         }
@@ -345,6 +343,7 @@ internal sealed partial class Clyde
             _shadowProgram?.Delete(); _shadowTarget?.Dispose();
             if (_fullscreenVao != 0) GL.DeleteVertexArray(_fullscreenVao);
             if (_sampler != 0) GL.DeleteSampler(_sampler);
+            if (_mipSampler != 0) GL.DeleteSampler(_mipSampler);
             _owner._spatialRenderers.Remove(this);
         }
     }

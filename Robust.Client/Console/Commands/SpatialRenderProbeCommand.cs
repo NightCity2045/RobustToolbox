@@ -114,6 +114,7 @@ internal sealed partial class SpatialRenderProbeCommand : IConsoleCommand
         }
         finally { _entities.DeleteEntity(sprite); }
         CheckOffscreenShadow(Capture, report);
+        CheckMaterialMips(Capture, report);
         // Repeated independent views may not retain render targets after disposal.
         for (var i = 0; i < 8; i++)
         {
@@ -130,7 +131,7 @@ internal sealed partial class SpatialRenderProbeCommand : IConsoleCommand
         {
             using (var stream = _resources.UserData.OpenWrite(new ResPath($"/{name}.png"))) image.SaveAsPng(stream);
             captures.Add(name, image);
-            if (captures.Count != 8) return;
+            if (captures.Count != 10) return;
             try
             {
                 var original = captures["spatial-probe"];
@@ -172,9 +173,23 @@ internal sealed partial class SpatialRenderProbeCommand : IConsoleCommand
                     if (offscreenLit[x, y].R - offscreen[x, y].R > 5) offscreenPixels++;
                 report["offscreen_caster_shadowed_pixels"] = offscreenPixels;
                 shadows &= offscreenPixels > 20;
-                report["passed"] = maxDifference <= 2 && markers && slices && spriteFiltered && diagnostic && shadows;
+                var nearMaterial = captures["spatial-probe-material-near"];
+                var farMaterial = captures["spatial-probe-material-far"];
+                var nearBlack = 0; var nearWhite = 0; var farWrong = 0;
+                for (var y = 80; y < 176; y++)
+                for (var x = 80; x < 176; x++)
+                {
+                    var nearPixel = nearMaterial[x, y]; var farPixel = farMaterial[x, y];
+                    if (nearPixel.R < 5 && nearPixel.G < 5 && nearPixel.B < 5) nearBlack++;
+                    if (nearPixel.R > 250 && nearPixel.G > 250 && nearPixel.B > 250) nearWhite++;
+                    if (Math.Abs(farPixel.R - 188) > 2 || Math.Abs(farPixel.G - 188) > 2 || Math.Abs(farPixel.B - 188) > 2) farWrong++;
+                }
+                var materials = nearBlack > 100 && nearWhite > 100 && farWrong == 0;
+                report["near_nearest_black_pixels"] = nearBlack; report["near_nearest_white_pixels"] = nearWhite;
+                report["far_isolated_mip_wrong_pixels"] = farWrong;
+                report["passed"] = maxDifference <= 2 && markers && slices && spriteFiltered && diagnostic && shadows && materials;
                 _resources.UserData.WriteAllText(new ResPath("/spatial-probe.json"), JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
-                if (maxDifference > 2 || !markers || !slices || !spriteFiltered || !diagnostic || !shadows)
+                if (maxDifference > 2 || !markers || !slices || !spriteFiltered || !diagnostic || !shadows || !materials)
                     throw new InvalidOperationException("Spatial render qualification failed; inspect spatial-probe.json.");
                 Logger.InfoS("spatial.render", "Spatial render probe passed; screenshots and report saved in user data.");
             }

@@ -9,14 +9,16 @@ namespace Robust.Client.Graphics.Spatial;
 
 public enum SpatialAlphaMode : byte { Opaque, Cutout, Transparent }
 public enum SpatialLightKind : byte { Point, Spot }
+public enum SpatialTextureSampling : byte { Nearest, PixelMip }
 
 /// <summary>Content-provided appearance; linear color/emission, repeat scale in frame-local metres.</summary>
 public sealed record SpatialRenderMaterial(Texture? Texture, Vector4 Color, Vector3 Emission,
-    Vector2 Repeat, SpatialAlphaMode AlphaMode = SpatialAlphaMode.Opaque, float AlphaCutoff = 0.5f, bool DoubleSided = false)
+    Vector2 Repeat, SpatialAlphaMode AlphaMode = SpatialAlphaMode.Opaque, float AlphaCutoff = 0.5f, bool DoubleSided = false,
+    SpatialTextureSampling Sampling = SpatialTextureSampling.Nearest)
 {
     internal void Validate()
     {
-        if (!Enum.IsDefined(AlphaMode) || !Finite(Color) || Color.X < 0 || Color.Y < 0 || Color.Z < 0 || Color.W < 0 || Color.W > 1
+        if (!Enum.IsDefined(AlphaMode) || !Enum.IsDefined(Sampling) || !Finite(Color) || Color.X < 0 || Color.Y < 0 || Color.Z < 0 || Color.W < 0 || Color.W > 1
             || !Finite(new Vector4(Emission, 0)) || Emission.X < 0 || Emission.Y < 0 || Emission.Z < 0
             || !float.IsFinite(Repeat.X) || !float.IsFinite(Repeat.Y) || Repeat.X <= 0 || Repeat.Y <= 0
             || !float.IsFinite(AlphaCutoff) || AlphaCutoff < 0 || AlphaCutoff > 1)

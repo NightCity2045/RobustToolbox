@@ -32,7 +32,7 @@ surface revisions and material profiles survive batching for diagnostics/picking
 
 Raw GL state is saved/restored around spatial work. Queued 2D drawing is flushed
 before borrowing the context. ReloadShaders compiles all replacement programs
-before exchanging either one, retaining the working pair on failure. The existing
+before exchanging any of them, retaining the working programs on failure. The existing
 resource watcher also handles spatial `.vert`/`.frag` edits.
 
 ## Bounded shadows
@@ -83,6 +83,33 @@ BudgetExceeded. The caller must handle these states explicitly. Old walls or
 missing mandatory geometry are not used as a silent fallback. Target attachments
 also consume memory in addition to the mesh byte count.
 
+## Isolated material mipmaps
+
+Build `SpatialTextureMipChain` from the specific source image region, with explicit
+dimension and byte limits. Cropping precedes reduction: neighboring atlas sprites
+never enter the pyramid. Each pyramid becomes a separate repeating texture, so
+its mip levels need no shared-atlas padding. Existing RSI atlases stay unchanged.
+Reduction uses linear light, alpha-weighted color and area weights for odd image
+dimensions. An optional cutout threshold preserves the nearest representable alpha
+coverage without feeding corrected alpha back into subsequent reduction levels.
+Building works on detached pixels and supports cancellation without accessing ECS
+or GL. The caller must keep the source unchanged during the initial copy.
+
+On the Clyde thread, `CreateSpatialTextureUpload` allocates a complete pyramid
+within the supplied per-texture GPU byte limit. Call Upload with a byte budget;
+it transfers whole RGBA pixels and can stop partway through a scanline. Texture
+access is rejected until every level is ready. Dispose cancels unfinished work or
+releases a finished texture. Texture data is immutable; replace the entire pyramid
+for an appearance change. The caller also owns aggregate cache/residency limits.
+
+Bind the completed texture with `SpatialTextureSampling.PixelMip`. Magnification
+uses nearest sampling; minification interpolates adjacent mip levels, with nearest
+sampling within each level. Explicit gradients come from unrepeated UVs so repeat
+seams do not select an incorrectly coarse level. Forward and shadow passes share
+the same material binding. A cutout material's threshold must match the pyramid;
+transparent materials cannot use cutout-corrected alpha. Ordinary `Nearest`
+bindings continue to support existing atlas regions with half-texel insets.
+
 ## Flat authoring view
 
 `TopDownSliceView` is a separate frame/layer projection. Its explicit frame-local
@@ -105,6 +132,9 @@ RSI sprite, reverses transparency submission, reloads shaders eight times, compo
 UI markers, checks layer filtering/openings and exercises target resize/disposal.
 It also compares shadows on/off, checks a completely off-camera occluder, and swaps
 a growing/shrinking mesh pair at an unchanged exact GPU residency limit.
+Material captures check nearest magnification and isolated minification against
+known pixels, a 13-byte upload budget, hidden incomplete textures, cancellation
+and unchanged texture counts after disposal.
 Do not run the qualification loop during a live performance measurement.
 
 The standalone local fixture used `--self-contained`, desktop
@@ -113,8 +143,8 @@ and starting ECS, and an Xvfb display. This environment needs SDL3's
 `SDL_VIDEO_FORCE_EGL=1` to obtain an sRGB-capable desktop context. This is an
 environment-specific launcher setting, not a change to normal game startup.
 
-This implementation does not close E05/G4. Distant texture/mip
-qualification, full game viewport/view-switch integration and broader performance
+This implementation does not close E05/G4. Full game viewport/view-switch
+integration and broader performance
 acceptance remain. E06 perspective asset profiles, composition caches, effects and
 XYZ audio, as well as content resource bindings and gameplay integration, remain
 separate required work. The diagnostic images are not screenshots of integrated

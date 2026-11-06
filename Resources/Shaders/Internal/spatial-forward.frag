@@ -9,6 +9,7 @@ uniform vec3 uEmission;
 uniform vec3 uAmbient;
 uniform float uCutoff;
 uniform int uPass;
+uniform int uMip;
 uniform int uLightCount;
 uniform vec4 uLightPositionRadius[16];
 uniform vec4 uLightColorKind[16];
@@ -46,8 +47,12 @@ float shadowVisibility(int baseFace, vec3 fromLight, float cosine) {
     return visibility;
 }
 void main() {
-    vec2 uv = uUvRect.xy + fract(vUv * uRepeat) * uUvRect.zw;
-    vec4 albedo = texture(uTexture, uv) * uColor;
+    vec2 repeated = vUv * uRepeat;
+    vec2 uv = uUvRect.xy + fract(repeated) * uUvRect.zw;
+    // Derivatives come from the unwrapped coordinates: fract seams must not
+    // suddenly select the coarsest mip level.
+    vec4 sampled = uMip != 0 ? textureGrad(uTexture, uv, dFdx(repeated), dFdy(repeated)) : texture(uTexture, uv);
+    vec4 albedo = sampled * uColor;
     if (albedo.a < uCutoff) discard;
     vec3 n = normalize(vNormal) * (gl_FrontFacing ? 1.0 : -1.0);
     vec3 light = uAmbient;

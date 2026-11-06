@@ -406,6 +406,8 @@ namespace Robust.Client.Graphics.Clyde
             }
 
             var loaded = _loadedTextures[texture.TextureId];
+            if (loaded.SpatialMipLevels != 0)
+                throw new InvalidOperationException("Spatial mip textures are immutable; replace the complete pyramid.");
             var pixType = GetTexturePixelType<T>();
 
             if (pixType != loaded.TexturePixelType)
@@ -580,6 +582,8 @@ namespace Robust.Client.Graphics.Clyde
             public string? Name;
             public long MemoryPressure;
             public TexturePixelType TexturePixelType;
+            public int SpatialMipLevels;
+            public float? SpatialMipAlphaCutoff;
 
             public Vector2i Size => (Width, Height);
             public required WeakReference<ClydeTexture> TextureInstance;

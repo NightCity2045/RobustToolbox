@@ -31,6 +31,8 @@ namespace Robust.Client.Graphics.Clyde
         public bool SupportsSpatialRendering => false;
         public Spatial.ISpatialRenderer CreateSpatialRenderer(Vector2i size, Spatial.SpatialRendererLimits limits)
             => throw new NotSupportedException("A headless client has no spatial graphics context.");
+        public Spatial.ISpatialTextureUpload CreateSpatialTextureUpload(Spatial.SpatialTextureMipChain chain, long maximumBytes, string? name = null)
+            => throw new NotSupportedException("A headless client has no spatial graphics context.");
         public IClydeWindow MainWindow { get; }
         public Vector2i ScreenSize => (1280, 720);
         public IEnumerable<IClydeWindow> AllWindows => _windows;

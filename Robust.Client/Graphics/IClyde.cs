@@ -114,6 +114,7 @@ namespace Robust.Client.Graphics
 
         bool SupportsSpatialRendering { get; }
         Spatial.ISpatialRenderer CreateSpatialRenderer(Vector2i size, Spatial.SpatialRendererLimits limits);
+        Spatial.ISpatialTextureUpload CreateSpatialTextureUpload(Spatial.SpatialTextureMipChain chain, long maximumBytes, string? name = null);
 
         // Cursor API.
         /// <summary>

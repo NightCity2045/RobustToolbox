@@ -82,15 +82,7 @@ internal sealed partial class Clyde
                         if (material.AlphaMode != SpatialAlphaMode.Transparent)
                         {
                             if (material.DoubleSided) GL.Disable(EnableCap.CullFace); else GL.Enable(EnableCap.CullFace);
-                            var texture = RenderHandle.ExtractTexture(material.Texture ?? _owner.GetStockTexture(ClydeStockTexture.White), null, out var region);
-                            var uv = RenderHandle.WorldTextureBoundsToUV(texture, region);
-                            var inset = new Vector2(0.5f / texture.Width, 0.5f / texture.Height);
-                            _shadowProgram.SetUniform("uUvRect", new Vector4(uv.Left + inset.X, uv.Bottom + inset.Y,
-                                Math.Max(0, uv.Width - inset.X * 2), Math.Max(0, uv.Height - inset.Y * 2)));
-                            BindTexture(0, texture);
-                            _shadowProgram.SetUniform("uRepeat", material.Repeat);
-                            _shadowProgram.SetUniform("uAlpha", material.Color.W);
-                            _shadowProgram.SetUniform("uCutoff", material.AlphaMode == SpatialAlphaMode.Cutout ? material.AlphaCutoff : 0);
+                            SetMaterialTexture(_shadowProgram, material);
                             GL.DrawElements(PrimitiveType.Triangles, (end - i) * 6, DrawElementsType.UnsignedInt, (IntPtr) (first.FirstIndex * sizeof(int)));
                             draws++;
                         }

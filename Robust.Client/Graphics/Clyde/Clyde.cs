@@ -592,6 +592,7 @@ namespace Robust.Client.Graphics.Clyde
         public void Shutdown()
         {
             foreach (var renderer in _spatialRenderers.ToArray()) renderer.Dispose();
+            foreach (var upload in _spatialTextureUploads.ToArray()) upload.Dispose();
             ClearPostShaderRenderTargetPool();
             _postShaderEventEntries.Clear();
 
