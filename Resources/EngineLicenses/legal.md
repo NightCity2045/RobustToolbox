@@ -20,6 +20,12 @@ Furthermore, the following contributors have agreed to retroactively relicense t
 
 * PJB3005
 
+## Spatial physics dependency
+
+BepuPhysics and BepuUtilities 2.4.0 are copyright Bepu Entertainment LLC,
+authored by Ross Nordby, and distributed under [Apache License 2.0](Apache-2.0.txt).
+Source: https://github.com/bepu/bepuphysics2/tree/v2.4.0
+
 ## Warranty
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR

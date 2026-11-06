@@ -17,6 +17,36 @@ namespace Robust.Shared.Tests.Spatial;
 [TestFixture]
 public sealed class BepuQualificationTest
 {
+    [TestCase(30)]
+    [TestCase(60)]
+    public void ContinuousDetectionStopsRotatingBodyAtWall(int tickRate)
+    {
+        var pool = new BufferPool();
+        try
+        {
+            using var simulation = Simulation.Create(pool, new Contacts(), new Gravity(), new SolveDescription(8, 1));
+            simulation.Statics.Add(new StaticDescription(new Vector3(0, 1.5f, 0),
+                simulation.Shapes.Add(new Box(100, 0.1f, 100))));
+            var bar = new Box(4, 0.2f, 0.2f);
+            var handle = simulation.Bodies.Add(BodyDescription.CreateDynamic(
+                new RigidPose(Vector3.Zero), new BodyVelocity(Vector3.Zero, new Vector3(0, 0, 60)),
+                bar.ComputeInertia(1), new CollidableDescription(simulation.Shapes.Add(bar), 1f,
+                    ContinuousDetection.Continuous(1e-6f, 1e-6f)), 0.01f));
+            for (var tick = 0; tick < 10; tick++)
+            {
+                simulation.Timestep(1f / tickRate);
+                var body = simulation.Bodies.GetBodyReference(handle);
+                // Support of the oriented box along +Y, not just its center.
+                var extent = 2 * MathF.Abs(Vector3.Transform(Vector3.UnitX, body.Pose.Orientation).Y)
+                    + 0.1f * MathF.Abs(Vector3.Transform(Vector3.UnitY, body.Pose.Orientation).Y)
+                    + 0.1f * MathF.Abs(Vector3.Transform(Vector3.UnitZ, body.Pose.Orientation).Y);
+                Assert.That(body.Pose.Position.Y + extent, Is.LessThanOrEqualTo(1.48f),
+                    "Rotating body's volume penetrated the wall by more than 0.03m.");
+            }
+        }
+        finally { pool.Clear(); }
+    }
+
     [Test]
     public void CompoundQueryPreservesGapBetweenChildren()
     {

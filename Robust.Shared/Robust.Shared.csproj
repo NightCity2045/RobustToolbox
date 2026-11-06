@@ -7,6 +7,8 @@
     <NoWarn>CA1416</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Spatial backend belongs to the trusted engine. Do not expose its compile API to content. -->
+    <PackageReference Include="BepuPhysics" PrivateAssets="compile" />
     <PackageReference Include="JetBrains.Annotations" PrivateAssets="All" />
     <PackageReference Include="Microsoft.Extensions.ObjectPool" />
     <PackageReference Include="Microsoft.ILVerification" PrivateAssets="compile" />

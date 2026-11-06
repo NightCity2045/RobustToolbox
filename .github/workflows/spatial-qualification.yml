@@ -1,0 +1,56 @@
+name: Spatial engine qualification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [spatial-foundation]
+  pull_request:
+    branches: [spatial-foundation]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spatial-engine-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qualify:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            runtime: linux-x64
+          - os: windows-2022
+            runtime: win-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          submodules: recursive
+      - uses: actions/setup-dotnet@v4.1.0
+        with:
+          dotnet-version: 10.0.100
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Record actual runner image and SDK
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release/qualification
+          @{ ImageOS = $env:ImageOS; ImageVersion = $env:ImageVersion; Engine = (git rev-parse HEAD); SDK = (dotnet --version) } | ConvertTo-Json | Set-Content release/qualification/runner.json
+      - name: Restore and build
+        run: dotnet build -m:2
+      - name: Run complete engine tests
+        run: dotnet test --no-build --no-restore --logger trx --results-directory release/qualification -- NUnit.ConsoleOut=0
+      - name: Package standalone engine after tests
+        run: python Tools/package_standalone_client.py --runtime ${{ matrix.runtime }} --output release/qualification/Robust.Client.Standalone_${{ matrix.runtime }}.zip
+      - name: Archive qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: spatial-engine-${{ matrix.runtime }}
+          path: release/qualification/
+          retention-days: 14
