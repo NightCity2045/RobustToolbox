@@ -40,7 +40,9 @@ public sealed partial class EntitySerializer : ISerializationContext,
     ITypeSerializer<NetEntity, ValueDataNode>,
     ITypeSerializer<MapId, ValueDataNode>
 {
-    public const int MapFormatVersion = 7;
+    public const int MapFormatVersion = 8;
+    public const int TransformSchemaVersion = 1;
+    // NightCity spatial v7->v8: canonical XYZ position and XYZW orientation.
     // v6->v7: PR #5572 - Added more metadata, List maps/grids/orphans, include some life-stage information
     // v5->v6: PR #4307 - Converted Tile.TypeId from ushort to int
     // v4->v5: PR #3992 - Removed name & author fields
@@ -537,11 +539,8 @@ public sealed partial class EntitySerializer : ISerializationContext,
         }
 
         var components = new SequenceDataNode();
-        if (xform.NoLocalRotation && xform.LocalRotation != 0)
-        {
-            _log.Error($"Encountered a no-rotation entity with non-zero local rotation: {EntMan.ToPrettyString(uid)}");
-            xform._localRotation = 0;
-        }
+        if (xform.NoLocalRotation && xform.LocalPose.Rotation != System.Numerics.Quaternion.Identity)
+            throw new InvalidOperationException($"Cannot save no-rotation entity with non-identity orientation: {EntMan.ToPrettyString(uid)}");
 
         try
         {
@@ -728,6 +727,7 @@ public sealed partial class EntitySerializer : ISerializationContext,
         return new MappingDataNode
         {
             {"format", MapFormatVersion.ToString(CultureInfo.InvariantCulture)},
+            {"transformSchema", TransformSchemaVersion.ToString(CultureInfo.InvariantCulture)},
             {"category", GetCategory().ToString()},
             {"engineVersion", _conf.GetCVar(CVars.BuildEngineVersion) },
             {"forkId", _conf.GetCVar(CVars.BuildForkId)},

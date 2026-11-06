@@ -116,7 +116,8 @@ internal sealed class RayCast_Test
         }
         else
         {
-            Assert.That(hits.Results.First().Point, Is.EqualTo(point.Value));
+            // Quaternion-backed transforms introduce float roundoff; compare hit positions in metres.
+            Assert.That(Vector2.Distance(hits.Results.First().Point, point.Value), Is.LessThan(1e-6f));
         }
     }
 
@@ -146,7 +147,18 @@ internal sealed class RayCast_Test
         }
         else
         {
-            Assert.That(hits.Results.First().Point, Is.EqualTo(point.Value));
+            var hit = hits.Results.First().Point;
+            if (shape is SlimPolygon)
+            {
+                // Parallel box faces have a contact segment, not a unique contact vertex.
+                // Tiny orientation roundoff can choose a different witness on that segment.
+                Assert.That(hit.X, Is.InRange(-0.5f - 1e-6f, 0.5f + 1e-6f));
+                Assert.That(hit.Y, Is.EqualTo(point.Value.Y).Within(1e-6f));
+            }
+            else
+            {
+                Assert.That(Vector2.Distance(hit, point.Value), Is.LessThan(1e-6f));
+            }
         }
     }
 

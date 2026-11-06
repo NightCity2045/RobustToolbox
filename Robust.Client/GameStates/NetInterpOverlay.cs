@@ -1,3 +1,4 @@
+using System.Numerics;
 using System;
 using Robust.Shared.Enums;
 using Robust.Client.Graphics;
@@ -68,7 +69,7 @@ namespace Robust.Client.GameStates
 
                 var (pos, rot) = _xform.GetWorldPositionRotation(transform, _entityManager.GetEntityQuery<TransformComponent>());
                 var boxOffset = transform.NextPosition != null
-                    ? transform.NextPosition.Value - transform.LocalPosition
+                    ? new Vector2(transform.NextPosition.Value.X, transform.NextPosition.Value.Y) - transform.LocalPosition
                     : default;
                 var worldOffset = (rot - transform.LocalRotation).RotateVec(boxOffset);
 
@@ -79,7 +80,7 @@ namespace Robust.Client.GameStates
 
                 Angle nextRot = rot;
                 if (transform.NextRotation.HasValue)
-                    nextRot += transform.NextRotation.Value - transform.LocalRotation;
+                    nextRot += TransformComponent.ProjectYaw(transform.NextRotation.Value) - transform.LocalRotation;
                 var nextBox = new Box2Rotated(nextAabb, nextRot, nextAabb.Center);
                 worldHandle.DrawRect(nextBox, Color.Green.WithAlpha(0.1f), true);
                 worldHandle.DrawRect(nextBox, Color.Green, false);

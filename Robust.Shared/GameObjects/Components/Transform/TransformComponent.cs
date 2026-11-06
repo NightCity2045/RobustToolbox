@@ -9,6 +9,7 @@ using Robust.Shared.Map;
 using Robust.Shared.Maths;
 using Robust.Shared.Serialization.Manager.Attributes;
 using Robust.Shared.Timing;
+using Robust.Shared.Serialization.TypeSerializers.Implementations.Custom;
 using Robust.Shared.Utility;
 using Robust.Shared.ViewVariables;
 
@@ -31,9 +32,38 @@ namespace Robust.Shared.GameObjects
 
         [DataField("parent")] internal EntityUid _parent;
 
-        [DataField("pos")] internal Vector2 _localPosition = Vector2.Zero; // holds offset from parent
+        [DataField("pos", customTypeSerializer: typeof(TransformPositionSerializer))]
+        internal Vector3 _localPosition3;
 
-        [DataField("rot")] internal Angle _localRotation; // local rotation
+        [DataField("rot", customTypeSerializer: typeof(TransformRotationSerializer))]
+        internal Quaternion _localRotation3 = Quaternion.Identity;
+
+        /// <summary>The sole local pose, including height, pitch and roll.</summary>
+        public RigidTransform3 LocalPose => new(_localPosition3, _localRotation3);
+
+        // Derived legacy projections. These are not serialized or replicated state.
+        internal Vector2 _localPosition
+        {
+            get => new(_localPosition3.X, _localPosition3.Y);
+            set => _localPosition3 = new Vector3(value, _localPosition3.Z);
+        }
+
+        internal Angle _localRotation
+        {
+            get => ProjectYaw(_localRotation3);
+            set => _localRotation3 = WithYaw(_localRotation3, value);
+        }
+
+        internal static Angle ProjectYaw(Quaternion rotation)
+            => new(Math.Atan2(2d * (rotation.W * rotation.Z + rotation.X * rotation.Y),
+                1d - 2d * (rotation.Y * rotation.Y + rotation.Z * rotation.Z)));
+
+        internal static Quaternion WithYaw(Quaternion rotation, Angle yaw)
+        {
+            var delta = SharedTransformSystem.NormalizeRotation(yaw - ProjectYaw(rotation));
+            return new RigidTransform3(Vector3.Zero, Quaternion.Concatenate(rotation,
+                Quaternion.CreateFromAxisAngle(Vector3.UnitZ, (float) delta.Theta))).Rotation;
+        }
 
         [DataField("noRot")] internal bool _noLocalRotation;
 
@@ -90,16 +120,16 @@ namespace Robust.Shared.GameObjects
         // used for lerping
 
         [ViewVariables]
-        public Vector2? NextPosition { get; internal set; }
+        public Vector3? NextPosition { get; internal set; }
 
         [ViewVariables]
-        public Angle? NextRotation { get; internal set; }
+        public Quaternion? NextRotation { get; internal set; }
 
         [ViewVariables]
-        public Vector2 PrevPosition { get; internal set; }
+        public Vector3 PrevPosition { get; internal set; }
 
         [ViewVariables]
-        public Angle PrevRotation { get; internal set; }
+        public Quaternion PrevRotation { get; internal set; }
 
         [ViewVariables] public bool ActivelyLerping;
 
@@ -140,11 +170,7 @@ namespace Robust.Shared.GameObjects
             [Obsolete("Use SharedTransformSystem.SetNoLocalRotation() instead")]
             set
             {
-                if (value)
-                    LocalRotation = Angle.Zero;
-
-                _noLocalRotation = value;
-                _entMan.DirtyField(Owner, this, nameof(NoLocalRotation));
+                _entMan.System<SharedTransformSystem>().SetNoLocalRotation((Owner, this), value);
             }
         }
 
@@ -167,7 +193,7 @@ namespace Robust.Shared.GameObjects
                 if (_localRotation.EqualsApprox(value))
                     return;
 
-                var oldRotation = _localRotation;
+                var oldPose = LocalPose;
                 _localRotation = value;
                 var meta = _entMan.GetComponent<MetaDataComponent>(Owner);
                 _entMan.DirtyField(Owner, this, nameof(LocalRotation), meta);
@@ -176,7 +202,7 @@ namespace Robust.Shared.GameObjects
                 if (!Initialized)
                     return;
 
-                _entMan.System<SharedTransformSystem>().RaiseMoveEvent((Owner, this, meta), _parent, _localPosition, oldRotation, MapUid, checkTraversal: false);
+                _entMan.System<SharedTransformSystem>().RaiseMoveEvent((Owner, this, meta), _parent, oldPose, MapUid, checkTraversal: false);
             }
         }
 
@@ -354,7 +380,7 @@ namespace Robust.Shared.GameObjects
                     return;
 
                 var oldParent = _parent;
-                var oldPos = _localPosition;
+                var oldPose = LocalPose;
 
                 _localPosition = value;
                 var meta = _entMan.GetComponent<MetaDataComponent>(Owner);
@@ -364,7 +390,7 @@ namespace Robust.Shared.GameObjects
                 if (!Initialized)
                     return;
 
-                _entMan.System<SharedTransformSystem>().RaiseMoveEvent((Owner, this, meta), oldParent, oldPos, _localRotation, MapUid);
+                _entMan.System<SharedTransformSystem>().RaiseMoveEvent((Owner, this, meta), oldParent, oldPose, MapUid);
             }
         }
 
@@ -538,19 +564,23 @@ namespace Robust.Shared.GameObjects
         EntityCoordinates oldPos,
         EntityCoordinates newPos,
         Angle oldRotation,
-        Angle newRotation)
+        Angle newRotation,
+        RigidTransform3 oldPose,
+        RigidTransform3 newPose)
     {
         public readonly Entity<TransformComponent, MetaDataComponent> Entity = entity;
         public readonly EntityCoordinates OldPosition = oldPos;
         public readonly EntityCoordinates NewPosition = newPos;
         public readonly Angle OldRotation = oldRotation;
         public readonly Angle NewRotation = newRotation;
+        public readonly RigidTransform3 OldPose = oldPose;
+        public readonly RigidTransform3 NewPose = newPose;
 
         public EntityUid Sender => Entity.Owner;
         public TransformComponent Component => Entity.Comp1;
 
         public bool ParentChanged => NewPosition.EntityId != OldPosition.EntityId;
-        public bool OnlyRotation => OldPosition.Equals(NewPosition);
+        public bool OnlyRotation => !ParentChanged && OldPose.Position == NewPose.Position;
     }
 
     public struct TransformChildrenEnumerator : IDisposable

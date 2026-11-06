@@ -4,6 +4,7 @@ using Robust.Shared.GameObjects;
 using Robust.Shared.Map;
 using Robust.Shared.Maths;
 using Robust.Shared.Network;
+using Robust.Shared.Timing;
 using Robust.UnitTesting;
 
 namespace Robust.Client.IntegrationTests.GameObjects.Components;
@@ -51,4 +52,35 @@ public sealed class TransformValidationTest : RobustIntegrationTest
             });
         });
     }
+
+    [Test]
+    public async Task SpatialInterpolationIncludesHeightAndPitch()
+    {
+        using var server = StartServer(new ServerIntegrationOptions { Pool = false });
+        using var client = StartClient(new ClientIntegrationOptions { Pool = false });
+        await Task.WhenAll(server.WaitIdleAsync(), client.WaitIdleAsync());
+        client.SetConnectTarget(server);
+        await client.WaitPost(() => client.Resolve<IClientNetManager>().ClientConnect(null!, 0, null!));
+        await RunTicksSync(server, client, 10);
+        await client.WaitAssertion(() =>
+        {
+            var entities = client.Resolve<IEntityManager>();
+            entities.System<SharedMapSystem>().CreateMap(out var mapId);
+            var uid = entities.Spawn(null, new MapCoordinates(Vector2.Zero, mapId));
+            var transform = entities.GetComponent<TransformComponent>(uid);
+            var transforms = entities.System<SharedTransformSystem>();
+            var timing = client.Resolve<IGameTiming>();
+            transforms.SetLocalPoseNoLerp(uid, new RigidTransform3(new Vector3(0, 0, 2), Quaternion.Identity));
+            transforms.SetLocalPose(uid, new RigidTransform3(new Vector3(0, 0, 3),
+                Quaternion.CreateFromAxisAngle(Vector3.UnitX, MathF.PI / 2)));
+            timing.TickRemainder = timing.TickPeriod / 2;
+            transforms.FrameUpdate(0);
+            Assert.That(transform.LocalPose.Position.Z, Is.EqualTo(2.5f).Within(1e-5f));
+            var up = transform.LocalPose.TransformVector(Vector3.UnitY);
+            Assert.That(Vector3.Distance(up, new Vector3(0, MathF.Sqrt(0.5f), MathF.Sqrt(0.5f))), Is.LessThan(1e-5f));
+            Assert.That(transform.NextPosition!.Value.Z, Is.EqualTo(3));
+            timing.TickRemainder = TimeSpan.Zero;
+        });
+    }
+
 }

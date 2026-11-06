@@ -82,8 +82,8 @@ namespace Robust.Client.GameObjects
                 xform.ActivelyLerping = true;
                 xform.PredictedLerp = false;
                 xform.LerpParent = xform.ParentUid;
-                xform.PrevRotation = xform._localRotation;
-                xform.PrevPosition = xform._localPosition;
+                xform.PrevRotation = xform._localRotation3;
+                xform.PrevPosition = xform._localPosition3;
                 xform.LastLerp = _gameTiming.CurTick;
                 return;
             }
@@ -100,8 +100,8 @@ namespace Robust.Client.GameObjects
                 _lerpingTransforms.Add((uid, xform));
                 xform.ActivelyLerping = true;
                 xform.PredictedLerp = true;
-                xform.PrevRotation = xform._localRotation;
-                xform.PrevPosition = xform._localPosition;
+                xform.PrevRotation = xform._localRotation3;
+                xform.PrevPosition = xform._localPosition3;
                 xform.LerpParent = xform.ParentUid;
                 return;
             }
@@ -110,8 +110,8 @@ namespace Robust.Client.GameObjects
             {
                 // Existing lerp was not due to prediction, but due to state application. That lerp should already
                 // have been rendered, so we will start a new lerp from the current position.
-                xform.PrevRotation = xform._localRotation;
-                xform.PrevPosition = xform._localPosition;
+                xform.PrevRotation = xform._localRotation3;
+                xform.PrevPosition = xform._localPosition3;
                 xform.LerpParent = xform.ParentUid;
             }
         }
@@ -142,7 +142,7 @@ namespace Robust.Client.GameObjects
 
                         if (distance is > MinInterpolationDistanceSquared and < MaxInterpolationDistanceSquared)
                         {
-                            SetLocalPositionNoLerp(uid, Vector2.Lerp(lerpSource, lerpDest, step), transform);
+                            SetLocalPoseNoLerp(uid, new RigidTransform3(Vector3.Lerp(lerpSource, lerpDest, step), transform._localRotation3), transform);
                             transform.NextPosition = lerpDest;
                             found = true;
                         }
@@ -152,7 +152,7 @@ namespace Robust.Client.GameObjects
                     {
                         var lerpDest = transform.NextRotation.Value;
                         var lerpSource = transform.PrevRotation;
-                        SetLocalRotationNoLerp(uid, Angle.Lerp(lerpSource, lerpDest, step), transform);
+                        SetLocalPoseNoLerp(uid, new RigidTransform3(transform._localPosition3, Quaternion.Slerp(lerpSource, lerpDest, step)), transform);
                         transform.NextRotation = lerpDest;
                         found = true;
                     }

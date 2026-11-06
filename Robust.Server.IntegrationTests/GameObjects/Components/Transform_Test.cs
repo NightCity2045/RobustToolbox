@@ -446,11 +446,11 @@ namespace Robust.Server.IntegrationTests.GameObjects.Components
 
             XformSystem.SetLocalRotation(entity, Angle.FromDegrees(90), transform);
 
-            Assert.That(transform.LocalRotation, NUnit.Framework.Is.EqualTo(Angle.FromDegrees(90)));
+            Assert.That(transform.LocalRotation, new ApproxEqualityConstraint(Angle.FromDegrees(90)));
 
             XformSystem.SetWorldRotation(transform, Angle.FromDegrees(810));
 
-            Assert.That(transform.LocalRotation, NUnit.Framework.Is.EqualTo(Angle.FromDegrees(90)));
+            Assert.That(transform.LocalRotation, new ApproxEqualityConstraint(Angle.FromDegrees(90)));
         }
 
         /// <summary>

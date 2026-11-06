@@ -510,6 +510,9 @@ public abstract partial class SharedTransformSystem
 
     private void OnCompInit(EntityUid uid, TransformComponent component, ComponentInit args)
     {
+        ValidatePose(component.LocalPose);
+        if (component.NoLocalRotation && component._localRotation3 != Quaternion.Identity)
+            throw new InvalidOperationException("A no-rotation transform must have identity orientation.");
         InitializeMapUid(uid, component);
 
         // Has to be done if _parent is set from ExposeData.
@@ -716,7 +719,7 @@ public abstract partial class SharedTransformSystem
     {
         if (!double.IsFinite(rotation.Theta))
             throw new ArgumentOutOfRangeException(nameof(rotation), "Transform rotation must be finite.");
-        return rotation.Reduced();
+        return new Angle(rotation.Theta % Math.Tau);
     }
 
     public void SetLocalRotationNoLerp(EntityUid uid, Angle value, TransformComponent? xform = null)
@@ -753,8 +756,17 @@ public abstract partial class SharedTransformSystem
 
     public void SetNoLocalRotation(Entity<TransformComponent> entity, bool value)
     {
-        if (value)
-            SetLocalRotation(entity.Owner, Angle.Zero, entity.Comp);
+        if (value && entity.Comp._localRotation3 != Quaternion.Identity)
+        {
+            var oldPose = entity.Comp.LocalPose;
+            var meta = MetaData(entity.Owner);
+            entity.Comp._localRotation3 = Quaternion.Identity;
+            entity.Comp.MatricesDirty = true;
+            DirtyField(entity.Owner, entity.Comp, nameof(TransformComponent.LocalRotation), meta);
+            if (entity.Comp.Initialized)
+                RaiseMoveEvent((entity.Owner, entity.Comp, meta), entity.Comp.ParentUid, oldPose,
+                    entity.Comp.MapUid, checkTraversal: false);
+        }
 
         entity.Comp._noLocalRotation = value;
         DirtyField(entity.Owner, entity.Comp, nameof(TransformComponent.NoLocalRotation));
@@ -785,63 +797,81 @@ public abstract partial class SharedTransformSystem
         TransformComponent? newParent = null,
         TransformComponent? oldParent = null)
     {
+        ValidatePosition(value.Position);
+        var orientation = rotation is { } yaw
+            ? TransformComponent.WithYaw(entity.Comp1._localRotation3, NormalizeRotation(yaw))
+            : (Quaternion?) null;
+        SetCoordinates3(entity, value.EntityId, new Vector3(value.Position, entity.Comp1._localPosition3.Z),
+            orientation, unanchor, newParent, oldParent);
+    }
+
+    private void SetCoordinates3(
+        Entity<TransformComponent, MetaDataComponent> entity,
+        EntityUid parent,
+        Vector3 position,
+        Quaternion? rotation = null,
+        bool unanchor = true,
+        TransformComponent? newParent = null,
+        TransformComponent? oldParent = null,
+        bool ignoreNoLocalRotation = false)
+    {
         var (uid, xform, meta) = entity;
         // Validate before unanchoring, dirtying, or changing any part of the pose.
         // NOTE: This setter must be callable from before initialize.
-        ValidatePosition(value.Position);
+        var requested = new RigidTransform3(position, rotation ?? xform._localRotation3);
         if (rotation != null)
-            rotation = NormalizeRotation(rotation.Value);
+            rotation = requested.Rotation;
 
-        if (xform.ParentUid == value.EntityId
-            && xform._localPosition.EqualsApprox(value.Position)
-            && (rotation == null || MathHelper.CloseTo(rotation.Value.Theta, xform._localRotation.Theta)))
+        if (xform.ParentUid == parent
+            && xform._localPosition3 == position
+            && (rotation == null || rotation.Value == xform._localRotation3))
         {
             return;
         }
 
-        if (value.EntityId != xform.ParentUid && value.EntityId.IsValid())
+        if (parent != xform.ParentUid && parent.IsValid())
         {
             if (meta.EntityLifeStage >= EntityLifeStage.Terminating)
             {
-                Log.Error($"{ToPrettyString(uid)} is attempting to move while terminating. New parent: {ToPrettyString(value.EntityId)}. Trace: {Environment.StackTrace}");
+                Log.Error($"{ToPrettyString(uid)} is attempting to move while terminating. New parent: {ToPrettyString(parent)}. Trace: {Environment.StackTrace}");
                 return;
             }
 
-            if (TerminatingOrDeleted(value.EntityId))
+            if (TerminatingOrDeleted(parent))
             {
-                Log.Error($"{ToPrettyString(uid)} is attempting to attach itself to a terminating entity {ToPrettyString(value.EntityId)}. Trace: {Environment.StackTrace}");
+                Log.Error($"{ToPrettyString(uid)} is attempting to attach itself to a terminating entity {ToPrettyString(parent)}. Trace: {Environment.StackTrace}");
                 return;
             }
         }
 
-        if (value.EntityId != xform._parent)
+        if (parent != xform._parent)
         {
-            if (value.EntityId == uid)
+            if (parent == uid)
             {
                 throw new InvalidOperationException($"Attempted to parent an entity to itself: {ToPrettyString(uid)}");
             }
 
-            if (value.EntityId.IsValid())
+            if (parent.IsValid())
             {
-                if (!XformQuery.Resolve(value.EntityId, ref newParent, false))
+                if (!XformQuery.Resolve(parent, ref newParent, false))
                 {
-                    throw new InvalidOperationException($"Attempted to parent entity {ToPrettyString(uid)} to non-existent entity {value.EntityId}");
+                    throw new InvalidOperationException($"Attempted to parent entity {ToPrettyString(uid)} to non-existent entity {parent}");
                 }
 
-                if (newParent.LifeStage >= ComponentLifeStage.Stopping || LifeStage(value.EntityId) >= EntityLifeStage.Terminating)
+                if (newParent.LifeStage >= ComponentLifeStage.Stopping || LifeStage(parent) >= EntityLifeStage.Terminating)
                 {
-                    throw new InvalidOperationException($"Attempted to re-parent to a terminating object. Entity: {ToPrettyString(uid)}, new parent: {ToPrettyString(value.EntityId)}");
+                    throw new InvalidOperationException($"Attempted to re-parent to a terminating object. Entity: {ToPrettyString(uid)}, new parent: {ToPrettyString(parent)}");
                 }
 
                 // Check even before map ids are initialized.
-                var recursiveUid = value.EntityId;
+                var recursiveUid = parent;
                 var recursiveXform = newParent;
                 while (recursiveXform.ParentUid.IsValid())
                 {
                     if (recursiveXform.ParentUid == uid)
                     {
                         if (!_gameTiming.ApplyingState)
-                            throw new InvalidOperationException($"Attempted to parent an entity to one of its descendants! {ToPrettyString(uid)}. new parent: {ToPrettyString(value.EntityId)}");
+                            throw new InvalidOperationException($"Attempted to parent an entity to one of its descendants! {ToPrettyString(uid)}. new parent: {ToPrettyString(parent)}");
 
                         // Client is halfway through applying server state, which can sometimes lead to a temporarily circular transform hierarchy.
                         // E.g., client is holding a foldable bed and predicts dropping & sitting in it -> reset to holding it -> bed is parent of player and vice versa.
@@ -856,7 +886,7 @@ public abstract partial class SharedTransformSystem
                     recursiveXform = XformQuery.GetComponent(recursiveUid);
                 }
 
-                InitializeMapUid(value.EntityId, newParent);
+                InitializeMapUid(parent, newParent);
             }
         }
 
@@ -864,11 +894,10 @@ public abstract partial class SharedTransformSystem
             Unanchor(uid, xform);
 
         var oldParentUid = xform._parent;
-        var oldPosition = xform._localPosition;
-        var oldRotation = xform._localRotation;
+        var oldPose = xform.LocalPose;
         var oldMap = xform.MapUid;
 
-        var parentChanged = value.EntityId != oldParentUid;
+        var parentChanged = parent != oldParentUid;
 
         if (parentChanged)
         {
@@ -877,7 +906,7 @@ public abstract partial class SharedTransformSystem
                 nameof(TransformComponent.LocalRotation),
                 nameof(TransformComponent.ParentUid));
         }
-        else if (rotation != null && !xform.NoLocalRotation)
+        else if (rotation != null && (ignoreNoLocalRotation || !xform.NoLocalRotation))
         {
             DirtyFields(uid, xform, meta,
                 nameof(TransformComponent.LocalPosition),
@@ -890,15 +919,15 @@ public abstract partial class SharedTransformSystem
 
         // Set new values
         xform.MatricesDirty = true;
-        xform._localPosition = value.Position;
+        xform._localPosition3 = position;
 
-        if (rotation != null && !xform.NoLocalRotation)
-            xform._localRotation = NormalizeRotation(rotation.Value);
+        if (rotation != null && (ignoreNoLocalRotation || !xform.NoLocalRotation))
+            xform._localRotation3 = rotation.Value;
 
-        DebugTools.Assert(!xform.NoLocalRotation || xform.LocalRotation == 0);
+        DebugTools.Assert((ignoreNoLocalRotation || !xform.NoLocalRotation) || xform.LocalRotation == 0);
 
         // Perform parent change logic
-        if (value.EntityId != xform._parent)
+        if (parent != xform._parent)
         {
             if (xform._parent.IsValid())
                 XformQuery.Resolve(xform._parent, ref oldParent);
@@ -906,7 +935,7 @@ public abstract partial class SharedTransformSystem
             oldParent?._children.Remove(uid);
             newParent?._children.Add(uid);
 
-            xform._parent = value.EntityId;
+            xform._parent = parent;
 
             if (newParent != null)
             {
@@ -920,7 +949,7 @@ public abstract partial class SharedTransformSystem
                 else
                 {
                     if (!newParent._gridInitialized)
-                        InitializeGridUid(value.EntityId, newParent);
+                        InitializeGridUid(parent, newParent);
                     SetGridId(entity!, newParent.GridUid);
                 }
             }
@@ -939,10 +968,10 @@ public abstract partial class SharedTransformSystem
             if (xform.Initialized)
             {
                 // preserve world rotation
-                if (rotation == null && oldParent != null && newParent != null && !xform.NoLocalRotation)
-                    xform._localRotation = NormalizeRotation(xform._localRotation + GetWorldRotation(oldParent) - GetWorldRotation(newParent));
+                if (rotation == null && oldParent != null && newParent != null && (ignoreNoLocalRotation || !xform.NoLocalRotation))
+                    xform._localRotation3 = GetWorldPose(newParent).ToLocal(GetWorldPose(oldParent).Compose(oldPose)).Rotation;
 
-                DebugTools.Assert(!xform.NoLocalRotation || xform.LocalRotation == 0);
+                DebugTools.Assert((ignoreNoLocalRotation || !xform.NoLocalRotation) || xform.LocalRotation == 0);
             }
         }
 
@@ -955,7 +984,7 @@ public abstract partial class SharedTransformSystem
             DebugTools.Assert(xform.GridUid == null || xform.GridUid == uid || xform.GridUid == xform.MapUid);
 #endif
         // No need to check for grid traversal since we've already handled it
-        RaiseMoveEvent(entity, oldParentUid, oldPosition, oldRotation, oldMap, checkTraversal: false);
+        RaiseMoveEvent(entity, oldParentUid, oldPose, oldMap, checkTraversal: false);
     }
 
     public void SetCoordinates(
@@ -1104,12 +1133,8 @@ public abstract partial class SharedTransformSystem
         if (!xformQuery.Resolve(parent, ref parentXform))
             return;
 
-        var (_, parRot, parInvMatrix) = GetWorldPositionRotationInvMatrix(parentXform, xformQuery);
-        var (pos, rot) = GetWorldPositionRotation(xform, xformQuery);
-        var newPos = Vector2.Transform(pos, parInvMatrix);
-        var newRot = rot - parRot;
-
-        SetCoordinates(uid, xform, new EntityCoordinates(parent, newPos), newRot, newParent: parentXform);
+        var local = GetWorldPose(parentXform).ToLocal(GetWorldPose(xform));
+        SetCoordinates3((uid, xform, MetaData(uid)), parent, local.Position, local.Rotation, newParent: parentXform);
     }
 
     #endregion
@@ -1134,10 +1159,10 @@ public abstract partial class SharedTransformSystem
                 };
 
                 if ((aspects & (1UL << TransformLocalPositionIndex)) != 0)
-                    state.LocalPosition = component.LocalPosition;
+                    state.LocalPosition = component._localPosition3;
 
                 if ((aspects & (1UL << TransformLocalRotationIndex)) != 0)
-                    state.Rotation = component.LocalRotation;
+                    state.Rotation = component._localRotation3;
 
                 if ((aspects & (1UL << TransformParentIndex)) != 0)
                     state.ParentID = parent;
@@ -1154,8 +1179,8 @@ public abstract partial class SharedTransformSystem
         }
 
         args.State = new TransformComponentState(
-            component.LocalPosition,
-            component.LocalRotation,
+            component._localPosition3,
+            component._localRotation3,
             parent,
             component.NoLocalRotation,
             component.Anchored);
@@ -1165,12 +1190,15 @@ public abstract partial class SharedTransformSystem
     {
         if (GetTransformState(xform, args.Current) is { } newState)
         {
+            var statePose = new RigidTransform3(newState.LocalPosition, newState.Rotation);
+            if (newState.NoLocalRotation && statePose.Rotation != Quaternion.Identity)
+                throw new InvalidOperationException("A no-rotation transform state must have identity orientation.");
             var parent = EnsureEntity<TransformComponent>(newState.ParentID, uid);
             var oldAnchored = xform.Anchored;
 
             // update actual position data, if required
-            if (!xform.LocalPosition.EqualsApprox(newState.LocalPosition)
-                || !xform.LocalRotation.EqualsApprox(newState.Rotation)
+            if (xform._localPosition3 != newState.LocalPosition
+                || xform._localRotation3 != statePose.Rotation
                 || xform.ParentUid != parent)
             {
                 // remove from any old grid lookups
@@ -1184,7 +1212,7 @@ public abstract partial class SharedTransformSystem
                 xform._anchored |= newState.Anchored;
 
                 // Update the action position, rotation, and parent (and hence also map, grid, etc).
-                SetCoordinates(uid, xform, new EntityCoordinates(parent, newState.LocalPosition), newState.Rotation, unanchor: false);
+                SetCoordinates3((uid, xform, MetaData(uid)), parent, statePose.Position, statePose.Rotation, unanchor: false, ignoreNoLocalRotation: true);
 
                 xform._anchored = newState.Anchored;
 
@@ -1234,8 +1262,8 @@ public abstract partial class SharedTransformSystem
             {
                 var parent = GetNetEntity(xform.ParentUid);
                 var fullState = new TransformComponentState(
-                    xform.LocalPosition,
-                    xform.LocalRotation,
+                    xform._localPosition3,
+                    xform._localRotation3,
                     parent,
                     xform.NoLocalRotation,
                     xform.Anchored);
@@ -1256,8 +1284,9 @@ public abstract partial class SharedTransformSystem
                 if (nextTransform.ParentID != GetNetEntity(xform.ParentUid))
                     return;
 
-                xform.NextPosition = nextTransform.LocalPosition;
-                xform.NextRotation = nextTransform.Rotation;
+                var nextPose = new RigidTransform3(nextTransform.LocalPosition, nextTransform.Rotation);
+                xform.NextPosition = nextPose.Position;
+                xform.NextRotation = nextPose.Rotation;
                 ActivateLerp(uid, xform);
                 break;
             }
@@ -1267,16 +1296,19 @@ public abstract partial class SharedTransformSystem
                     return;
 
                 var activateLerp = false;
+                var nextPose = new RigidTransform3(
+                    delta.IsChanged(TransformLocalPositionIndex) ? delta.LocalPosition : xform._localPosition3,
+                    delta.IsChanged(TransformLocalRotationIndex) ? delta.Rotation : xform._localRotation3);
 
                 if (delta.IsChanged(TransformLocalPositionIndex))
                 {
-                    xform.NextPosition = delta.LocalPosition;
+                    xform.NextPosition = nextPose.Position;
                     activateLerp = true;
                 }
 
                 if (delta.IsChanged(TransformLocalRotationIndex))
                 {
-                    xform.NextRotation = delta.Rotation;
+                    xform.NextRotation = nextPose.Rotation;
                     activateLerp = true;
                 }
 
@@ -1684,8 +1716,8 @@ public abstract partial class SharedTransformSystem
             return;
 
         var oldParent = xform._parent;
+        var oldPose = xform.LocalPose;
         var oldPosition = xform._localPosition;
-        var oldRotation = xform.LocalRotation;
 
         if (!xform.Anchored)
             xform._localPosition = pos;
@@ -1707,8 +1739,7 @@ public abstract partial class SharedTransformSystem
         RaiseMoveEvent(
             (uid, xform, meta),
             oldParent,
-            oldPosition,
-            oldRotation,
+            oldPose,
             xform.MapUid,
             checkTraversal: !oldPosition.Equals(pos));
     }
@@ -2023,7 +2054,7 @@ public abstract partial class SharedTransformSystem
             RaiseLocalEvent(uid, ref anchorStateChangedEvent, true);
         }
 
-        SetCoordinates((uid, xform, meta), default, Angle.Zero, oldParent: oldXform);
+        SetCoordinates3((uid, xform, meta), EntityUid.Invalid, Vector3.Zero, Quaternion.Identity, oldParent: oldXform);
 
         DebugTools.Assert((meta.Flags & MetaDataFlags.InContainer) == 0x0,
             $"Entity is in a container after having been detached to null-space? Entity: {ToPrettyString(uid)}");

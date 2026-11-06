@@ -168,6 +168,14 @@ public sealed partial class EntityDeserializer :
             return false;
         }
 
+        if (Result.Version >= 8 &&
+            (!Data.Get<MappingDataNode>("meta").TryGet<ValueDataNode>("transformSchema", out var poseSchema)
+             || poseSchema.Value != EntitySerializer.TransformSchemaVersion.ToString(CultureInfo.InvariantCulture)))
+        {
+            _log.Error("Unsupported or missing spatial transform schema.");
+            return false;
+        }
+
         if (!ValidatePrototypes())
             return false;
 

@@ -278,8 +278,7 @@ namespace Robust.Shared.GameObjects
         internal void RaiseMoveEvent(
             Entity<TransformComponent, MetaDataComponent> ent,
             EntityUid oldParent,
-            Vector2 oldPosition,
-            Angle oldRotation,
+            RigidTransform3 oldPose,
             EntityUid? oldMap,
             bool checkTraversal = true)
         {
@@ -289,9 +288,10 @@ namespace Robust.Shared.GameObjects
 
             var oldPos = oldParent == EntityUid.Invalid
                 ? default
-                : new EntityCoordinates(oldParent, oldPosition);
+                : new EntityCoordinates(oldParent, new Vector2(oldPose.Position.X, oldPose.Position.Y));
 
-            var ev = new MoveEvent(ent, oldPos, pos, oldRotation, ent.Comp1._localRotation);
+            var ev = new MoveEvent(ent, oldPos, pos, TransformComponent.ProjectYaw(oldPose.Rotation),
+                ent.Comp1._localRotation, oldPose, ent.Comp1.LocalPose);
 
             if (oldParent != ent.Comp1._parent)
             {
@@ -339,12 +339,12 @@ namespace Robust.Shared.GameObjects
         /// <summary>
         ///     Current position offset of the entity.
         /// </summary>
-        public Vector2 LocalPosition;
+        public Vector3 LocalPosition;
 
         /// <summary>
         ///     Current rotation offset of the entity.
         /// </summary>
-        public Angle Rotation;
+        public Quaternion Rotation;
 
         /// <summary>
         /// Is the transform able to be locally rotated?
@@ -364,6 +364,10 @@ namespace Robust.Shared.GameObjects
         /// <param name="parentId">Current parent transform of this entity.</param>
         /// <param name="noLocalRotation"></param>
         public TransformComponentState(Vector2 localPosition, Angle rotation, NetEntity parentId, bool noLocalRotation, bool anchored)
+            : this(new Vector3(localPosition, 0), TransformComponent.WithYaw(Quaternion.Identity, rotation),
+                parentId, noLocalRotation, anchored) { }
+
+        public TransformComponentState(Vector3 localPosition, Quaternion rotation, NetEntity parentId, bool noLocalRotation, bool anchored)
         {
             LocalPosition = localPosition;
             Rotation = rotation;
@@ -379,10 +383,10 @@ namespace Robust.Shared.GameObjects
         public ulong ChangedFields { get; set; }
 
         [NetworkedDeltaField(SharedTransformSystem.TransformLocalPositionIndex)]
-        public Vector2 LocalPosition;
+        public Vector3 LocalPosition;
 
         [NetworkedDeltaField(SharedTransformSystem.TransformLocalRotationIndex)]
-        public Angle Rotation;
+        public Quaternion Rotation;
 
         [NetworkedDeltaField(SharedTransformSystem.TransformParentIndex)]
         public NetEntity ParentID;

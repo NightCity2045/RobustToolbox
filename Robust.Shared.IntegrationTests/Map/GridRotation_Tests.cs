@@ -38,7 +38,7 @@ namespace Robust.UnitTesting.Shared.Map
 
                 // Rotate 180 degrees should show -10, 0 for the position in map-terms and 10, 0 for the position in entity terms (i.e. no change).
                 transformSystem.SetWorldRotation(gridEnt, transformSystem.GetWorldRotation(gridEnt) + new Angle(MathF.PI));
-                Assert.That(transformSystem.GetWorldRotation(gridEnt), Is.EqualTo(new Angle(MathF.PI)));
+                Assert.That(transformSystem.GetWorldRotation(gridEnt), Is.Approximately(new Angle(MathF.PI)));
                 // Check the map coordinate rotates correctly
                 Assert.That(mapSystem.WorldToLocal(gridEnt, grid.Comp, new Vector2(10, 0)).EqualsApprox(new Vector2(-10, 0), 0.01f));
                 Assert.That(mapSystem.LocalToWorld(gridEnt, grid.Comp, coordinates.Position).EqualsApprox(new Vector2(-10, 0), 0.01f));

@@ -15,7 +15,7 @@ public sealed partial class TransformSystem
         if (!XformQuery.Resolve(uid, ref xform))
             return;
 
-        xform.NextPosition = value;
+        xform.NextPosition = new Vector3(value, xform._localPosition3.Z);
         ActivateLerp(uid, xform);
         base.SetLocalPosition(uid, value, xform);
     }
@@ -27,7 +27,7 @@ public sealed partial class TransformSystem
         if (!XformQuery.Resolve(uid, ref xform))
             return;
 
-        xform.NextRotation = value;
+        xform.NextRotation = TransformComponent.WithYaw(xform._localRotation3, value);
         ActivateLerp(uid, xform);
         base.SetLocalRotation(uid, value, xform);
     }
@@ -40,9 +40,21 @@ public sealed partial class TransformSystem
         if (!XformQuery.Resolve(uid, ref xform))
             return;
 
-        xform.NextPosition = pos;
-        xform.NextRotation = rot;
+        xform.NextPosition = new Vector3(pos, xform._localPosition3.Z);
+        xform.NextRotation = TransformComponent.WithYaw(xform._localRotation3, rot);
         ActivateLerp(uid, xform);
         base.SetLocalPositionRotation(uid, pos, rot, xform);
     }
+
+    public override void SetLocalPose(EntityUid uid, RigidTransform3 pose, TransformComponent? transform = null)
+    {
+        ValidatePose(pose);
+        if (!XformQuery.Resolve(uid, ref transform))
+            return;
+        transform.NextPosition = pose.Position;
+        transform.NextRotation = pose.Rotation;
+        ActivateLerp(uid, transform);
+        base.SetLocalPose(uid, pose, transform);
+    }
+
 }
