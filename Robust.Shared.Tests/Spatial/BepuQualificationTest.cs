@@ -301,6 +301,65 @@ public sealed class BepuQualificationTest
         finally { pool.Clear(); }
     }
 
+    [Test]
+    public void RegisteredCompoundContinuousDetectionStopsFastSphereAtThinWall()
+    {
+        var pool = new BufferPool();
+        try
+        {
+            using var simulation = Simulation.Create(pool, new Contacts(), new Gravity(), new SolveDescription(8, 1));
+            Robust.Shared.Spatial.Physics.SpatialSweepRegistration.Register(simulation.NarrowPhase.SweepTaskRegistry);
+            pool.Take<CompoundChild>(1, out var wallChildren);
+            wallChildren[0] = new CompoundChild
+            {
+                ShapeIndex = simulation.Shapes.Add(new Box(0.1f, 10, 10)),
+                LocalPose = new RigidPose(Vector3.Zero)
+            };
+            simulation.Statics.Add(new StaticDescription(Vector3.Zero, simulation.Shapes.Add(new Compound(wallChildren))));
+            var sphere = new Sphere(0.1f);
+            pool.Take<CompoundChild>(1, out var bodyChildren);
+            bodyChildren[0] = new CompoundChild
+            {
+                ShapeIndex = simulation.Shapes.Add(sphere), LocalPose = new RigidPose(Vector3.Zero)
+            };
+            var body = simulation.Bodies.Add(BodyDescription.CreateDynamic(new Vector3(-2, 0, 0),
+                new BodyVelocity(new Vector3(300, 0, 0)), sphere.ComputeInertia(1),
+                new CollidableDescription(simulation.Shapes.Add(new Compound(bodyChildren)), 1f,
+                    ContinuousDetection.Continuous(1e-6f, 1e-6f)), 0.01f));
+            simulation.Timestep(1f / 30);
+            Assert.That(simulation.Bodies.GetBodyReference(body).Pose.Position.X, Is.LessThan(-0.1f));
+        }
+        finally { pool.Clear(); }
+    }
+
+    [TestCase(false, 1f / 60)]
+    [TestCase(false, 2f)]
+    [TestCase(true, 1f / 60)]
+    [TestCase(true, 2f)]
+    public void RegisteredConvexCompoundSweepsUseSecondsExactlyOnce(bool indexed, float duration)
+    {
+        var pool = new BufferPool();
+        try
+        {
+            using var simulation = Simulation.Create(pool, new Contacts(), new Gravity(), new SolveDescription(8, 1));
+            Robust.Shared.Spatial.Physics.SpatialSweepRegistration.Register(simulation.NarrowPhase.SweepTaskRegistry);
+            pool.Take<CompoundChild>(1, out var children);
+            children[0] = new CompoundChild
+            {
+                ShapeIndex = simulation.Shapes.Add(new Box(0.1f, 10, 10)), LocalPose = new RigidPose(Vector3.Zero)
+            };
+            var shape = indexed ? simulation.Shapes.Add(new BigCompound(children, simulation.Shapes, pool))
+                : simulation.Shapes.Add(new Compound(children));
+            simulation.Statics.Add(new StaticDescription(Vector3.Zero, shape));
+            var hit = new SweepHit();
+            simulation.Sweep(new Sphere(0.1f), new RigidPose(new Vector3(-2, 0, 0)),
+                new BodyVelocity(new Vector3(300, 0, 0)), duration, pool, ref hit);
+            Assert.That(hit.Hit, Is.True);
+            Assert.That(hit.Time * 300, Is.EqualTo(1.85f).Within(0.01f));
+        }
+        finally { pool.Clear(); }
+    }
+
     private struct RayHit : IRayHitHandler
     {
         public float Distance;
