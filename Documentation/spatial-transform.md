@@ -8,7 +8,12 @@ still need the explicit plane/world diagnostics required by the spatial plan.
 
 `SharedTransformSystem.GetWorldPose`, `SetLocalPose`, `SetWorldPose`,
 `SetParentLocalPose`, and `ConvertPoint` operate on the full pose. `SetParent`
-uses the full hierarchy for world-preserving reparenting. Existing anchoring and
+uses the full hierarchy for world-preserving reparenting. `GetPoseRelativeTo`,
+`GetPlanarPosition`, and `SetPlanarPosition` explicitly select a frame in the same
+world hierarchy. A planar write preserves signed depth in that frame and world
+orientation, including when the selected plane is tilted. Cross-world projection
+is rejected before a write. `GetWorldMatrix3`/`GetInvWorldMatrix3` are derived
+matrices, not additional state. Existing anchoring and
 `NoLocalRotation` restrictions still apply. `MoveEvent` carries both full local
 poses alongside its legacy projections; a height-only move is not a rotation-only
 event. Layer selection is not involved in these transformations.
@@ -47,9 +52,11 @@ explicit client test is not executed. New tests cover nested frames, reparenting
 height-preserving planar writes, full/delta corrections, a no-rotation transition,
 network byte round trips, two independent loads of an XYZ map, invalid mutations,
 and a connected client's height/pitch interpolation. Legacy map tests also pass.
+Two subsequent tests verify depth-preserving writes on a tilted plane and atomic
+cross-world rejection; all six spatial transform tests pass.
 
 E01/G1 is not complete. Spatial-world profiles, stable world/layer/surface IDs,
-explicit plane adapters and diagnostics, and full movement ownership/lifecycle
+diagnostics for implicit planar calls, and full movement ownership/lifecycle
 integration remain. The existing physics, query, renderer, and PVS implementations
 are still planar; this pose migration does not qualify them as spatial systems.
 Frame velocity mathematics is implemented, but physics-owned XYZ velocities are

@@ -24,7 +24,57 @@ public abstract partial class SharedTransformSystem
 
     /// <summary>Express a point in another entity frame without projecting away height.</summary>
     public Vector3 ConvertPoint(EntityUid sourceFrame, EntityUid targetFrame, Vector3 point)
-        => GetWorldPose(targetFrame).InverseTransformPoint(GetWorldPose(sourceFrame).TransformPoint(point));
+    {
+        RequireSameWorld(sourceFrame, targetFrame);
+        return GetWorldPose(targetFrame).InverseTransformPoint(GetWorldPose(sourceFrame).TransformPoint(point));
+    }
+
+    /// <summary>Express the complete pose in an explicitly selected frame of the same world.</summary>
+    public RigidTransform3 GetPoseRelativeTo(EntityUid uid, EntityUid frame)
+    {
+        RequireSameWorld(uid, frame);
+        return GetWorldPose(frame).ToLocal(GetWorldPose(uid));
+    }
+
+    public Matrix4x4 GetWorldMatrix3(EntityUid uid) => GetWorldPose(uid).ToMatrix();
+    public Matrix4x4 GetInvWorldMatrix3(EntityUid uid) => GetWorldPose(uid).Inverse().ToMatrix();
+
+    /// <summary>Explicit projection onto the selected frame's XY plane.</summary>
+    public Vector2 GetPlanarPosition(EntityUid uid, EntityUid planeFrame)
+    {
+        var position = GetPoseRelativeTo(uid, planeFrame).Position;
+        return new Vector2(position.X, position.Y);
+    }
+
+    /// <summary>
+    /// Change coordinates in a selected frame's XY plane while preserving signed
+    /// depth in that frame and the entity's complete world orientation. A tilted
+    /// plane's normal need not be the world's +Z axis.
+    /// </summary>
+    public void SetPlanarPosition(EntityUid uid, EntityUid planeFrame, Vector2 position)
+    {
+        ValidatePosition(position);
+        var relative = GetPoseRelativeTo(uid, planeFrame);
+        var updated = new RigidTransform3(new Vector3(position, relative.Position.Z), relative.Rotation);
+        SetWorldPose(uid, GetWorldPose(planeFrame).Compose(updated));
+    }
+
+    private void RequireSameWorld(EntityUid first, EntityUid second)
+    {
+        if (Root(first) != Root(second))
+            throw new InvalidOperationException("Coordinate conversion requires frames in the same world hierarchy.");
+    }
+
+    private EntityUid Root(EntityUid uid)
+    {
+        var transform = XformQuery.GetComponent(uid);
+        while (transform.ParentUid.IsValid())
+        {
+            uid = transform.ParentUid;
+            transform = XformQuery.GetComponent(uid);
+        }
+        return uid;
+    }
 
     public virtual void SetLocalPose(EntityUid uid, RigidTransform3 pose, TransformComponent? transform = null)
         => SetLocalPoseNoLerp(uid, pose, transform);

@@ -134,4 +134,45 @@ public sealed class SpatialTransformTests
 
     private static void Near(Vector3 actual, Vector3 expected)
         => Assert.That(Vector3.Distance(actual, expected), Is.LessThan(0.0001f), $"Expected {expected}, got {actual}");
+
+    [Test]
+    public void ExplicitTiltedPlaneWritePreservesDepthAndWorldOrientation()
+    {
+        var sim = RobustServerSimulation.NewSimulation().InitializeInstance();
+        var entities = sim.Resolve<IEntityManager>();
+        var map = sim.CreateMap().MapId;
+        var transforms = entities.System<SharedTransformSystem>();
+        var plane = entities.Spawn(null, new MapCoordinates(Vector2.Zero, map));
+        var uid = entities.Spawn(null, new MapCoordinates(Vector2.Zero, map));
+        transforms.SetLocalPose(plane, new RigidTransform3(new Vector3(0, 10, 0),
+            Quaternion.CreateFromAxisAngle(Vector3.UnitX, MathF.PI / 2)));
+        var before = new RigidTransform3(new Vector3(3, 4, 5), Quaternion.CreateFromYawPitchRoll(0.7f, -0.3f, 1.2f));
+        transforms.SetWorldPose(uid, before);
+        Near(transforms.GetPoseRelativeTo(uid, plane).Position, new Vector3(3, 5, 6));
+
+        transforms.SetPlanarPosition(uid, plane, new Vector2(-2, 7));
+        var after = transforms.GetWorldPose(uid);
+        SamePose(after, new RigidTransform3(new Vector3(-2, 4, 7), before.Rotation));
+        Near(transforms.GetPoseRelativeTo(uid, plane).Position, new Vector3(-2, 7, 6));
+        Assert.That(Vector2.Distance(transforms.GetPlanarPosition(uid, plane), new Vector2(-2, 7)), Is.LessThan(1e-5));
+        Near(Vector3.Transform(Vector3.One, transforms.GetWorldMatrix3(uid)), after.TransformPoint(Vector3.One));
+        Near(Vector3.Transform(after.TransformPoint(Vector3.One), transforms.GetInvWorldMatrix3(uid)), Vector3.One);
+    }
+
+    [Test]
+    public void CrossWorldProjectionAndWriteFailWithoutChangingPose()
+    {
+        var sim = RobustServerSimulation.NewSimulation().InitializeInstance();
+        var entities = sim.Resolve<IEntityManager>();
+        var firstMap = sim.CreateMap().MapId;
+        var secondMap = sim.CreateMap().MapId;
+        var transforms = entities.System<SharedTransformSystem>();
+        var uid = entities.Spawn(null, new MapCoordinates(Vector2.One, firstMap));
+        var otherFrame = entities.Spawn(null, new MapCoordinates(Vector2.Zero, secondMap));
+        var before = transforms.GetWorldPose(uid);
+        Assert.Throws<InvalidOperationException>(() => transforms.ConvertPoint(uid, otherFrame, Vector3.One));
+        Assert.Throws<InvalidOperationException>(() => transforms.GetPlanarPosition(uid, otherFrame));
+        Assert.Throws<InvalidOperationException>(() => transforms.SetPlanarPosition(uid, otherFrame, Vector2.Zero));
+        SamePose(transforms.GetWorldPose(uid), before);
+    }
 }
