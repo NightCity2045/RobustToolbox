@@ -17,6 +17,26 @@ namespace Robust.Shared.Tests.Spatial;
 [TestFixture]
 public sealed class BepuQualificationTest
 {
+    [Test]
+    public void RotatingShapeSweepDetectsObstacleBetweenEndpointPoses()
+    {
+        var pool = new BufferPool();
+        try
+        {
+            using var simulation = Simulation.Create(pool, new Contacts(), new Gravity(), new SolveDescription(8, 1));
+            // The bar starts and ends horizontal after a half turn. A query
+            // considering only those endpoint bounds would miss this obstacle.
+            simulation.Statics.Add(new StaticDescription(new Vector3(0, 1.5f, 0),
+                simulation.Shapes.Add(new Box(0.2f, 0.1f, 1))));
+            var hit = new SweepHit();
+            simulation.Sweep(new Box(4, 0.2f, 0.2f), new RigidPose(Vector3.Zero),
+                new BodyVelocity(Vector3.Zero, new Vector3(0, 0, 2 * MathF.PI)), 0.5f, pool, ref hit);
+            Assert.That(hit.Hit, Is.True);
+            Assert.That(hit.Time, Is.GreaterThan(0).And.LessThan(0.25f));
+        }
+        finally { pool.Clear(); }
+    }
+
     [TestCase(0f, true)]
     [TestCase(4f, false)]
     public void ShapeSweepRespectsHeight(float height, bool expectedHit)

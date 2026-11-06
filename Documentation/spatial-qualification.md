@@ -20,7 +20,8 @@ dotnet test Robust.Shared.Tests/Robust.Shared.Tests.csproj \
 ```
 
 The fixture checks +Z-up gravity and support at fixed 30/60Hz, body removal,
-raycasts distinguishing vertically stacked surfaces, height-aware shape sweeps, and a 300m/s sphere against
+raycasts distinguishing vertically stacked surfaces, height-aware shape sweeps,
+a rotating bar sweep that hits between its clear endpoint poses, and a 300m/s sphere against
 a 0.1m wall. Tests run without GPU or game content. They are not benchmarks.
 
 CCD qualification exposed two independent settings that must be recorded with
@@ -36,7 +37,7 @@ Do not weaken the collision assertion to qualify a failing profile.
 Reference for those semantics:
 https://github.com/bepu/bepuphysics2/blob/v2.4.0/Documentation/ContinuousCollisionDetection.md
 
-Still required before E00 is closed: overlap and rotational CCD,
+Still required before E00 is closed: overlap and rotating dynamic-body CCD,
 compound/constraint cases, loading through the trusted Robust engine path with
 content sandbox enabled, supported platform runs, allocation/performance
 budgets, GPU reference profile and the joint packaging/client acceptance.
