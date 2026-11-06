@@ -87,6 +87,12 @@ public record struct DeserializationOptions()
     /// If false, maps need to be manually given ids before entities are initialized.
     /// </summary>
     public bool AssignMapIds = true;
+
+    /// <summary>
+    /// Clone spatial worlds with new persistent identities instead of restoring the
+    /// saved identities. Runtime entity and frame references are remapped in either case.
+    /// </summary>
+    public bool RegenerateSpatialWorldIds = false;
 }
 
 /// <summary>

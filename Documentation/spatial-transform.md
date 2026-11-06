@@ -80,7 +80,8 @@ silently discarding orientation. Four further tests cover initialization, failed
 spawn cleanup, transferring a nested XYZ hierarchy between maps, deletion ownership,
 and clearing interpolation on detach. All 1236 Shared integration tests pass.
 
-E01/G1 is not complete. Spatial-world profiles, stable world/layer/surface IDs,
+World identity, layer definitions, references and connected-client persistence are
+described in `spatial-worlds.md`. E01/G1 is not complete. Spatial-world profiles, stable surface IDs,
 diagnostics for implicit planar calls, and full movement ownership/lifecycle
 integration remain. The existing physics, query, renderer, and PVS implementations
 are still planar; this pose migration does not qualify them as spatial systems.

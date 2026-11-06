@@ -200,6 +200,9 @@ public sealed partial class EntityDeserializer :
         // Load the prototype data onto entities, e.g. transform parents, etc.
         LoadEntities();
 
+        EntMan.System<Robust.Shared.Spatial.SharedSpatialSystem>()
+            .PrepareLoadedWorlds(Entities.Keys, Options.RegenerateSpatialWorldIds);
+
         // Get the lists of maps, grids, orphan, and nullspace entities
         GetRootEntities();
 
