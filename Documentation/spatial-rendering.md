@@ -143,10 +143,12 @@ and starting ECS, and an Xvfb display. This environment needs SDL3's
 `SDL_VIDEO_FORCE_EGL=1` to obtain an sRGB-capable desktop context. This is an
 environment-specific launcher setting, not a change to normal game startup.
 
-This implementation does not close E05/G4. Full game viewport/view-switch
-integration and broader performance
+The [spatial viewport control](spatial-viewports.md) hosts either view in ordinary
+UI, including multiple views, switching, scale-aware picking and filtered captures.
+This implementation does not close E05/G4. Full game view integration and broader performance
 acceptance remain. E06 [asset profiles and composition](spatial-visuals.md) share
 this renderer. [XYZ audio](spatial-audio.md) supplies the backend mechanism.
-Effects, content resource bindings and
+[Particles and screen effects](spatial-effects.md) supply bounded presentation.
+Content resource bindings and
 gameplay integration, remain required work. The diagnostic images are not screenshots of integrated
 spatial gameplay.
