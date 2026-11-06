@@ -10,6 +10,7 @@ uniform vec3 uAmbient;
 uniform float uCutoff;
 uniform int uPass;
 uniform int uMip;
+uniform int uPremultiplied;
 uniform int uLightCount;
 uniform vec4 uLightPositionRadius[16];
 uniform vec4 uLightColorKind[16];
@@ -52,6 +53,7 @@ void main() {
     // Derivatives come from the unwrapped coordinates: fract seams must not
     // suddenly select the coarsest mip level.
     vec4 sampled = uMip != 0 ? textureGrad(uTexture, uv, dFdx(repeated), dFdy(repeated)) : texture(uTexture, uv);
+    if (uPremultiplied != 0) sampled.rgb = sampled.a > 0.0 ? sampled.rgb / sampled.a : vec3(0.0);
     vec4 albedo = sampled * uColor;
     if (albedo.a < uCutoff) discard;
     vec3 n = normalize(vNormal) * (gl_FrontFacing ? 1.0 : -1.0);

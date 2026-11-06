@@ -146,7 +146,7 @@ internal sealed partial class Clyde
             if (!camera.Pose.IsValid || camera.AspectRatio <= 0) throw new ArgumentException("Invalid spatial camera.");
             _visible.Clear(); _required.Clear(); _requiredKeys.Clear(); _sceneKeys.Clear();
             SelectShadows(camera, scene);
-            long required = 0;
+            long required = SelectVisuals(camera, scene);
             foreach (var instance in scene.Instances)
             {
                 var key = (instance.Mesh.Source.OwnerFrame, instance.Mesh.Key);
@@ -169,7 +169,8 @@ internal sealed partial class Clyde
                 PrepareState();
                 GL.ActiveTexture(TextureUnit.Texture0);
                 foreach (var key in _meshes.Keys.Where(k => !_sceneKeys.Contains(k)).ToArray()) Remove(key);
-                if (required > _limits.MaximumMeshBytes)
+                RetireVisualMeshes();
+                if (required > _limits.MaximumMeshBytes || scene.Visuals.Count > _limits.MaximumVisuals)
                 {
                     ClearOutput(scene.ClearColor);
                     return Result(SpatialRenderStatus.BudgetExceeded);
@@ -189,7 +190,7 @@ internal sealed partial class Clyde
                         else Remove(key);
                     }
                 }
-                var ready = true;
+                var ready = UploadVisualMeshes(ref uploaded);
                 foreach (var instance in _required)
                 {
                     var mesh = instance.Mesh;
@@ -234,7 +235,7 @@ internal sealed partial class Clyde
             }
             finally { state.Restore(); _owner.CheckGlError(); }
 
-            SpatialRenderResult Result(SpatialRenderStatus status) => new(status, _visible.Count, draws, _residentBytes, uploaded, _shadowViews.Count);
+            SpatialRenderResult Result(SpatialRenderStatus status) => new(status, _visible.Count, draws, _residentBytes, uploaded, _shadowViews.Count, _visibleVisuals.Count);
             void DrawPass(int pass)
             {
                 GL.UseProgram(_forward.Handle);
@@ -247,7 +248,7 @@ internal sealed partial class Clyde
                     var gpu = _meshes[(mesh.Source.OwnerFrame, mesh.Key)];
                     GL.BindVertexArray(gpu.Vao);
                     _forward.SetUniform("uModel", instance.FramePose.ToMatrix(), transpose: false);
-                    SetLights(scene, instance);
+                    SetLights(scene, instance.FramePose.TransformPoint(mesh.Bounds.Center), mesh.Bounds.Size.Length() * 0.5f);
                     for (var i = 0; i < mesh.Faces.Count;)
                     {
                         var first = mesh.Faces[i];
@@ -265,16 +266,15 @@ internal sealed partial class Clyde
                         i = end;
                     }
                 }
+                draws += DrawVisuals(scene, _visibleVisuals, _forward, pass);
             }
         }
 
-        private void SetLights(SpatialRenderScene scene, SpatialRenderInstance instance)
+        private void SetLights(SpatialRenderScene scene, Vector3 center, float extent)
         {
             Span<SpatialRenderLight> selected = stackalloc SpatialRenderLight[16];
             Span<float> scores = stackalloc float[16];
             var count = 0;
-            var center = instance.FramePose.TransformPoint(instance.Mesh.Bounds.Center);
-            var extent = instance.Mesh.Bounds.Size.Length() * 0.5f;
             foreach (var light in scene.Lights)
             {
                 var distance = Vector3.DistanceSquared(center, light.Position);
@@ -338,6 +338,7 @@ internal sealed partial class Clyde
             if (_disposed) return;
             CheckThread(); _disposed = true;
             foreach (var gpu in _meshes.Values) gpu.Dispose(); _meshes.Clear(); _residentBytes = 0;
+            foreach (var gpu in _visualMeshes.Values) gpu.Dispose(); _visualMeshes.Clear();
             _opaque?.Dispose(); _accumulation?.Dispose(); _revealage?.Dispose(); _output?.Dispose();
             _forward?.Delete(); _composite?.Delete();
             _shadowProgram?.Delete(); _shadowTarget?.Dispose();
@@ -350,14 +351,18 @@ internal sealed partial class Clyde
 
     private sealed class SpatialGpuMesh : IDisposable
     {
-        public SpatialChunkMesh Mesh;
+        public SpatialChunkMesh Mesh = default!;
         public readonly int Vao;
         private readonly int _vertices, _indices, _vertexBytes;
+        private readonly ReadOnlyMemory<SpatialMeshVertex> _vertexData;
+        private readonly ReadOnlyMemory<int> _indexData;
+        public long BufferBytes => _vertexBytes + (long) _indexData.Length * sizeof(int);
         private int _uploaded;
-        public bool Ready => _uploaded == Mesh.EstimatedBufferBytes;
-        public SpatialGpuMesh(SpatialChunkMesh mesh)
+        public bool Ready => _uploaded == BufferBytes;
+        public SpatialGpuMesh(SpatialChunkMesh mesh) : this(mesh.VertexMemory, mesh.IndexMemory) { Mesh = mesh; }
+        public SpatialGpuMesh(ReadOnlyMemory<SpatialMeshVertex> vertices, ReadOnlyMemory<int> indices)
         {
-            Mesh = mesh; _vertexBytes = checked(mesh.Vertices.Count * 32);
+            _vertexData = vertices; _indexData = indices; _vertexBytes = checked(vertices.Length * 32);
             Vao = GL.GenVertexArray(); GL.BindVertexArray(Vao);
             _vertices = GL.GenBuffer(); _indices = GL.GenBuffer();
             try
@@ -365,7 +370,7 @@ internal sealed partial class Clyde
                 GL.BindBuffer(BufferTarget.ArrayBuffer, _vertices);
                 GL.BufferData(BufferTarget.ArrayBuffer, (IntPtr) _vertexBytes, IntPtr.Zero, BufferUsageHint.StaticDraw);
                 GL.BindBuffer(BufferTarget.ElementArrayBuffer, _indices);
-                GL.BufferData(BufferTarget.ElementArrayBuffer, (IntPtr) (mesh.Indices.Count * sizeof(int)), IntPtr.Zero, BufferUsageHint.StaticDraw);
+                GL.BufferData(BufferTarget.ElementArrayBuffer, (IntPtr) (indices.Length * sizeof(int)), IntPtr.Zero, BufferUsageHint.StaticDraw);
                 for (var i = 0; i < 3; i++) GL.EnableVertexAttribArray(i);
                 GL.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 32, 0);
                 GL.VertexAttribPointer(1, 3, VertexAttribPointerType.Float, false, 32, 12);
@@ -380,9 +385,9 @@ internal sealed partial class Clyde
             var start = _uploaded;
             GL.BindVertexArray(Vao);
             if (_uploaded < _vertexBytes)
-                Copy(BufferTarget.ArrayBuffer, _vertices, MemoryMarshal.AsBytes(Mesh.VertexMemory.Span), 0);
+                Copy(BufferTarget.ArrayBuffer, _vertices, MemoryMarshal.AsBytes(_vertexData.Span), 0);
             if (_uploaded >= _vertexBytes)
-                Copy(BufferTarget.ElementArrayBuffer, _indices, MemoryMarshal.AsBytes(Mesh.IndexMemory.Span), _vertexBytes);
+                Copy(BufferTarget.ElementArrayBuffer, _indices, MemoryMarshal.AsBytes(_indexData.Span), _vertexBytes);
             return _uploaded - start;
             void Copy(BufferTarget target, int buffer, ReadOnlySpan<byte> source, int baseOffset)
             {

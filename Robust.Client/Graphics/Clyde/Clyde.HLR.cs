@@ -643,6 +643,7 @@ namespace Robust.Client.Graphics.Clyde
             // Have to flush the render queue so that all commands finish rendering to the previous framebuffer.
             FlushRenderQueue();
 
+            try
             {
                 BindRenderTargetFull(RtToLoaded(rt));
                 if (clearColor is not null)
@@ -657,14 +658,24 @@ namespace Robust.Client.Graphics.Clyde
                 a();
 
                 FlushRenderQueue();
+                FenceRenderTarget(rt);
             }
-
-            FenceRenderTarget(rt);
-
-            PopRenderStateFull(state);
-            _updateUniformConstants(_currentRenderTarget.Size);
-
-            DrawSetModelTransform(oldTransform);
+            catch
+            {
+                // A failed appearance/overlay may have queued only part of its
+                // draw. Do not replay those commands into the caller's target.
+                BatchVertexIndex = 0;
+                BatchIndexIndex = 0;
+                _queuedRenderCommands.Clear();
+                _batchMetaData = null;
+                throw;
+            }
+            finally
+            {
+                PopRenderStateFull(state);
+                _updateUniformConstants(_currentRenderTarget.Size);
+                DrawSetModelTransform(oldTransform);
+            }
 
             DebugTools.Assert(oldCaps.Equals(_glCaps));
             DebugTools.Assert(_currentMatrixModel.Equals(oldTransform));

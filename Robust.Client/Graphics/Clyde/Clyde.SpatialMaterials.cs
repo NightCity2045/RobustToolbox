@@ -11,9 +11,12 @@ internal sealed partial class Clyde
 {
     private sealed partial class SpatialRenderer
     {
-        private void SetMaterialTexture(GLShaderProgram program, SpatialRenderMaterial material)
+        private void SetMaterialTexture(GLShaderProgram program, SpatialRenderMaterial material, UIBox2? normalizedRegion = null)
         {
-            var texture = RenderHandle.ExtractTexture(material.Texture ?? _owner.GetStockTexture(ClydeStockTexture.White), null, out var region);
+            var source = material.Texture ?? _owner.GetStockTexture(ClydeStockTexture.White);
+            UIBox2? subRegion = normalizedRegion is { } r
+                ? new UIBox2(r.Left * source.Width, r.Top * source.Height, r.Right * source.Width, r.Bottom * source.Height) : null;
+            var texture = RenderHandle.ExtractTexture(source, subRegion, out var region);
             var uv = RenderHandle.WorldTextureBoundsToUV(texture, region);
             var mip = material.Sampling == SpatialTextureSampling.PixelMip;
             if (mip)
@@ -37,6 +40,7 @@ internal sealed partial class Clyde
             BindTexture(0, texture);
             GL.BindSampler(0, mip ? _mipSampler : _sampler);
             program.SetUniform("uMip", mip ? 1 : 0);
+            if (program == _forward) program.SetUniform("uPremultiplied", material.PremultipliedAlpha ? 1 : 0);
             program.SetUniform("uRepeat", material.Repeat); program.SetUniform("uColor", material.Color);
             program.SetUniform("uCutoff", material.AlphaMode == SpatialAlphaMode.Cutout ? material.AlphaCutoff : 0);
         }

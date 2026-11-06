@@ -14,7 +14,7 @@ public enum SpatialTextureSampling : byte { Nearest, PixelMip }
 /// <summary>Content-provided appearance; linear color/emission, repeat scale in frame-local metres.</summary>
 public sealed record SpatialRenderMaterial(Texture? Texture, Vector4 Color, Vector3 Emission,
     Vector2 Repeat, SpatialAlphaMode AlphaMode = SpatialAlphaMode.Opaque, float AlphaCutoff = 0.5f, bool DoubleSided = false,
-    SpatialTextureSampling Sampling = SpatialTextureSampling.Nearest)
+    SpatialTextureSampling Sampling = SpatialTextureSampling.Nearest, bool PremultipliedAlpha = false)
 {
     internal void Validate()
     {
@@ -49,13 +49,15 @@ public readonly record struct SpatialRenderInstance(SpatialChunkMesh Mesh, Rigid
 public sealed class SpatialRenderScene
 {
     public IReadOnlyList<SpatialRenderInstance> Instances { get; }
+    public IReadOnlyList<SpatialVisualInstance> Visuals { get; }
     public IReadOnlyDictionary<string, SpatialRenderMaterial> Materials { get; }
     public IReadOnlyList<SpatialRenderLight> Lights { get; }
     public Vector3 Ambient { get; }
     public Vector4 ClearColor { get; }
 
     public SpatialRenderScene(IEnumerable<SpatialRenderInstance> instances, IReadOnlyDictionary<string, SpatialRenderMaterial> materials,
-        IEnumerable<SpatialRenderLight> lights, Vector3 ambient, Vector4 clearColor)
+        IEnumerable<SpatialRenderLight> lights, Vector3 ambient, Vector4 clearColor,
+        IEnumerable<SpatialVisualInstance>? visuals = null)
     {
         ArgumentNullException.ThrowIfNull(instances); ArgumentNullException.ThrowIfNull(materials); ArgumentNullException.ThrowIfNull(lights);
         var copy = instances.ToArray();
@@ -66,6 +68,9 @@ public sealed class SpatialRenderScene
         foreach (var material in bindings.Values) { ArgumentNullException.ThrowIfNull(material); material.Validate(); }
         if (copy.Any(i => i.Mesh.Faces.Any(f => !bindings.ContainsKey(f.MaterialProfile))))
             throw new ArgumentException("Every visible material profile requires an explicit binding.");
+        var visualArray = visuals?.ToArray() ?? Array.Empty<SpatialVisualInstance>();
+        if (visualArray.Any(v => v == null || !bindings.ContainsKey(v.MaterialProfile)))
+            throw new ArgumentException("Every spatial visual requires an explicit material binding.");
         var lightArray = lights.ToArray();
         foreach (var light in lightArray) light.Validate();
         if (!float.IsFinite(ambient.X) || !float.IsFinite(ambient.Y) || !float.IsFinite(ambient.Z)
@@ -73,6 +78,7 @@ public sealed class SpatialRenderScene
             || !float.IsFinite(clearColor.Z) || !float.IsFinite(clearColor.W) || clearColor.W < 0 || clearColor.W > 1)
             throw new ArgumentException("Invalid scene ambient/clear colors.");
         Instances = Array.AsReadOnly(copy);
+        Visuals = Array.AsReadOnly(visualArray);
         Materials = new System.Collections.ObjectModel.ReadOnlyDictionary<string, SpatialRenderMaterial>(bindings);
         Lights = Array.AsReadOnly(lightArray);
         Ambient = ambient; ClearColor = clearColor;
@@ -94,11 +100,11 @@ public readonly record struct SpatialShadowSettings(int MaximumLights, int Resol
 }
 
 public readonly record struct SpatialRendererLimits(long MaximumMeshBytes, int UploadBytesPerFrame, int MaximumPixels,
-    SpatialShadowSettings Shadows = default)
+    SpatialShadowSettings Shadows = default, int MaximumVisuals = 16384)
 {
     internal void Validate()
     {
-        if (MaximumMeshBytes <= 0 || MaximumMeshBytes > int.MaxValue || UploadBytesPerFrame <= 0 || MaximumPixels <= 0)
+        if (MaximumMeshBytes <= 0 || MaximumMeshBytes > int.MaxValue || UploadBytesPerFrame <= 0 || MaximumPixels <= 0 || MaximumVisuals <= 0)
             throw new ArgumentOutOfRangeException(nameof(MaximumMeshBytes), "Renderer budgets must be positive.");
         Shadows.Validate(MaximumPixels);
     }
@@ -106,7 +112,7 @@ public readonly record struct SpatialRendererLimits(long MaximumMeshBytes, int U
 
 public enum SpatialRenderStatus : byte { Ready, Uploading, BudgetExceeded }
 public readonly record struct SpatialRenderResult(SpatialRenderStatus Status, int VisibleChunks, int DrawCalls,
-    long ResidentMeshBytes, int UploadedBytes, int ShadowFaces = 0);
+    long ResidentMeshBytes, int UploadedBytes, int ShadowFaces = 0, int VisibleVisuals = 0);
 
 [NotContentImplementable]
 public interface ISpatialRenderer : IDisposable

@@ -145,7 +145,7 @@ environment-specific launcher setting, not a change to normal game startup.
 
 This implementation does not close E05/G4. Full game viewport/view-switch
 integration and broader performance
-acceptance remain. E06 perspective asset profiles, composition caches, effects and
-XYZ audio, as well as content resource bindings and gameplay integration, remain
-separate required work. The diagnostic images are not screenshots of integrated
+acceptance remain. E06 [asset profiles and composition](spatial-visuals.md) share
+this renderer. Effects and XYZ audio, as well as content resource bindings and
+gameplay integration, remain required work. The diagnostic images are not screenshots of integrated
 spatial gameplay.

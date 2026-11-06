@@ -89,6 +89,7 @@ internal sealed partial class Clyde
                         i = end;
                     }
                 }
+                draws += DrawVisuals(scene, _requiredVisuals.Where(v => camera.Frustum.Intersects(v.Bounds, v.Pose)), _shadowProgram, -1);
             }
             _owner.FenceRenderTarget(_shadowTarget);
             return draws;
