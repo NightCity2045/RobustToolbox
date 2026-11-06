@@ -27,7 +27,7 @@ public sealed record SpatialRenderMaterial(Texture? Texture, Vector4 Color, Vect
 
 /// <summary>World-space light; spot angles are cosines. Selection is independent of geometry authority.</summary>
 public readonly record struct SpatialRenderLight(SpatialLightKind Kind, Vector3 Position, float Radius,
-    Vector3 Color, Vector3 Direction, float InnerConeCosine = 1, float OuterConeCosine = 0)
+    Vector3 Color, Vector3 Direction, float InnerConeCosine = 1, float OuterConeCosine = 0, bool CastsShadows = false)
 {
     internal void Validate()
     {
@@ -77,18 +77,34 @@ public sealed class SpatialRenderScene
     }
 }
 
-public readonly record struct SpatialRendererLimits(long MaximumMeshBytes, int UploadBytesPerFrame, int MaximumPixels)
+/// <summary>Bounded point/spot shadow quality; zero lights disables shadows without changing scene authority.</summary>
+public readonly record struct SpatialShadowSettings(int MaximumLights, int Resolution, float NearPlane, float DepthBias)
+{
+    internal void Validate(int maximumPixels)
+    {
+        if (MaximumLights == 0) return;
+        // GLSL 1.40 minimum uniform capacity accommodates four six-face lights.
+        if (MaximumLights < 0 || MaximumLights > 4 || Resolution < 16 || Resolution > 1024
+            || 6L * MaximumLights * Resolution * Resolution > maximumPixels
+            || !float.IsFinite(NearPlane) || NearPlane <= 0 || !float.IsFinite(DepthBias) || DepthBias < 0 || DepthBias >= 1)
+            throw new ArgumentOutOfRangeException(nameof(MaximumLights), "Invalid spatial shadow profile or atlas pixel budget.");
+    }
+}
+
+public readonly record struct SpatialRendererLimits(long MaximumMeshBytes, int UploadBytesPerFrame, int MaximumPixels,
+    SpatialShadowSettings Shadows = default)
 {
     internal void Validate()
     {
         if (MaximumMeshBytes <= 0 || MaximumMeshBytes > int.MaxValue || UploadBytesPerFrame <= 0 || MaximumPixels <= 0)
             throw new ArgumentOutOfRangeException(nameof(MaximumMeshBytes), "Renderer budgets must be positive.");
+        Shadows.Validate(MaximumPixels);
     }
 }
 
 public enum SpatialRenderStatus : byte { Ready, Uploading, BudgetExceeded }
 public readonly record struct SpatialRenderResult(SpatialRenderStatus Status, int VisibleChunks, int DrawCalls,
-    long ResidentMeshBytes, int UploadedBytes);
+    long ResidentMeshBytes, int UploadedBytes, int ShadowFaces = 0);
 
 [NotContentImplementable]
 public interface ISpatialRenderer : IDisposable

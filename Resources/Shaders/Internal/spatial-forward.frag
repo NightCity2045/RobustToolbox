@@ -14,7 +14,37 @@ uniform vec4 uLightPositionRadius[16];
 uniform vec4 uLightColorKind[16];
 uniform vec4 uLightDirectionOuter[16];
 uniform float uLightInner[16];
+uniform int uShadowBase[16];
+uniform sampler2D uShadowAtlas;
+uniform mat4 uShadowMatrices[24];
+uniform vec4 uShadowRects[24];
+uniform vec2 uShadowTexel;
+uniform float uShadowBias;
 out vec4 fragColor;
+float shadowVisibility(int baseFace, vec3 fromLight, float cosine) {
+    if (baseFace < 0) return 1.0;
+    vec3 a = abs(fromLight);
+    int face;
+    if (a.x >= a.y && a.x >= a.z) face = fromLight.x >= 0.0 ? 0 : 1;
+    else if (a.y >= a.z) face = fromLight.y >= 0.0 ? 2 : 3;
+    else face = fromLight.z >= 0.0 ? 4 : 5;
+    int index = baseFace + face;
+    vec4 clip = uShadowMatrices[index] * vec4(vWorld, 1.0);
+    if (clip.w <= 0.0) return 1.0;
+    vec3 projected = clip.xyz / clip.w * 0.5 + 0.5;
+    if (projected.z <= 0.0 || projected.z >= 1.0) return 1.0;
+    vec4 rect = uShadowRects[index];
+    vec2 uv = rect.xy + projected.xy * rect.zw;
+    float depth = projected.z - uShadowBias * (1.0 + 3.0 * (1.0 - max(0.0, cosine)));
+    float visibility = 0.0;
+    // Four nearest depth comparisons, clamped within this face's atlas tile.
+    for (int y = 0; y < 2; y++) for (int x = 0; x < 2; x++) {
+        vec2 sampleUv = clamp(uv + (vec2(x, y) - 0.5) * uShadowTexel,
+            rect.xy + uShadowTexel * 0.5, rect.xy + rect.zw - uShadowTexel * 0.5);
+        visibility += depth <= texture(uShadowAtlas, sampleUv).r ? 0.25 : 0.0;
+    }
+    return visibility;
+}
 void main() {
     vec2 uv = uUvRect.xy + fract(vUv * uRepeat) * uUvRect.zw;
     vec4 albedo = texture(uTexture, uv) * uColor;
@@ -31,7 +61,9 @@ void main() {
         float cone = 1.0;
         if (uLightColorKind[i].w > 0.5)
             cone = smoothstep(uLightDirectionOuter[i].w, uLightInner[i], dot(-direction, uLightDirectionOuter[i].xyz));
-        light += uLightColorKind[i].rgb * max(0.0, dot(n, direction)) * falloff * falloff * cone;
+        float cosine = dot(n, direction);
+        light += uLightColorKind[i].rgb * max(0.0, cosine) * falloff * falloff * cone
+            * shadowVisibility(uShadowBase[i], -delta, cosine);
     }
     vec3 color = albedo.rgb * light + uEmission;
     if (uPass == 1) {

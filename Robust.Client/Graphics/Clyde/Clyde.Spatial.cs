@@ -28,13 +28,14 @@ internal sealed partial class Clyde
         return renderer;
     }
 
-    private sealed class SpatialRenderer : ISpatialRenderer
+    private sealed partial class SpatialRenderer : ISpatialRenderer
     {
         private readonly Clyde _owner;
         private readonly SpatialRendererLimits _limits;
         private readonly Dictionary<(EntityUid, SpatialMeshChunkKey), SpatialGpuMesh> _meshes = new();
         private readonly List<SpatialRenderInstance> _visible = new();
-        private readonly HashSet<(EntityUid, SpatialMeshChunkKey)> _visibleKeys = new();
+        private readonly List<SpatialRenderInstance> _required = new();
+        private readonly HashSet<(EntityUid, SpatialMeshChunkKey)> _requiredKeys = new();
         private readonly HashSet<(EntityUid, SpatialMeshChunkKey)> _sceneKeys = new();
         private RenderTexture _opaque = default!, _accumulation = default!, _revealage = default!, _output = default!;
         private GLShaderProgram _forward = default!, _composite = default!;
@@ -57,6 +58,7 @@ internal sealed partial class Clyde
                 GL.SamplerParameter(_sampler, SamplerParameterName.TextureWrapS, (int) TextureWrapMode.ClampToEdge);
                 GL.SamplerParameter(_sampler, SamplerParameterName.TextureWrapT, (int) TextureWrapMode.ClampToEdge);
                 Resize(size);
+                CreateShadowTarget();
                 owner.CheckGlError();
             }
             catch { Dispose(); throw; }
@@ -72,19 +74,21 @@ internal sealed partial class Clyde
             CheckThread();
             _owner.FlushRenderQueue();
             var state = new SpatialGlState();
-            GLShaderProgram? forward = null, composite = null;
+            GLShaderProgram? forward = null, composite = null, shadow = null;
             try
             {
                 forward = Program("spatial-forward", new[] { ("aPosition", 0u), ("aNormal", 1u), ("aUv", 2u) });
                 composite = Program("spatial-composite", Array.Empty<(string, uint)>());
-                var oldForward = _forward; var oldComposite = _composite;
+                shadow = Program("spatial-shadow", new[] { ("aPosition", 0u), ("aUv", 2u) });
+                var oldForward = _forward; var oldComposite = _composite; var oldShadow = _shadowProgram;
                 (_forward, _composite) = (forward, composite);
-                forward = composite = null;
-                oldForward?.Delete(); oldComposite?.Delete();
+                _shadowProgram = shadow;
+                forward = composite = shadow = null;
+                oldForward?.Delete(); oldComposite?.Delete(); oldShadow?.Delete();
             }
             finally
             {
-                forward?.Delete(); composite?.Delete();
+                forward?.Delete(); composite?.Delete(); shadow?.Delete();
                 state.Restore();
             }
         }
@@ -135,14 +139,19 @@ internal sealed partial class Clyde
         {
             CheckThread(); ArgumentNullException.ThrowIfNull(scene);
             if (!camera.Pose.IsValid || camera.AspectRatio <= 0) throw new ArgumentException("Invalid spatial camera.");
-            _visible.Clear(); _visibleKeys.Clear(); _sceneKeys.Clear();
+            _visible.Clear(); _required.Clear(); _requiredKeys.Clear(); _sceneKeys.Clear();
+            SelectShadows(camera, scene);
             long required = 0;
             foreach (var instance in scene.Instances)
             {
                 var key = (instance.Mesh.Source.OwnerFrame, instance.Mesh.Key);
                 _sceneKeys.Add(key);
-                if (!camera.Frustum.Intersects(instance.Mesh.Bounds, instance.FramePose)) continue;
-                _visible.Add(instance); _visibleKeys.Add(key);
+                var visible = camera.Frustum.Intersects(instance.Mesh.Bounds, instance.FramePose);
+                if (visible) _visible.Add(instance);
+                var shadowCaster = _shadowViews.Any(view => view.Frustum.Intersects(instance.Mesh.Bounds, instance.FramePose))
+                    && instance.Mesh.Faces.Any(face => scene.Materials[face.MaterialProfile].AlphaMode != SpatialAlphaMode.Transparent);
+                if (!visible && !shadowCaster) continue;
+                _required.Add(instance); _requiredKeys.Add(key);
                 required = checked(required + instance.Mesh.EstimatedBufferBytes);
             }
             // Finish queued 2D/UI operations before borrowing the GL context.
@@ -160,8 +169,10 @@ internal sealed partial class Clyde
                     ClearOutput(scene.ClearColor);
                     return Result(SpatialRenderStatus.BudgetExceeded);
                 }
-                var ready = true;
-                foreach (var instance in _visible)
+                // Retire every changed buffer before allocating replacements. A
+                // growing chunk can otherwise exhaust the budget while a later
+                // shrinking chunk still holds its old allocation.
+                foreach (var instance in _required)
                 {
                     var mesh = instance.Mesh;
                     var key = (mesh.Source.OwnerFrame, mesh.Key);
@@ -170,12 +181,18 @@ internal sealed partial class Clyde
                         if (gpu.Mesh.VertexMemory.Equals(mesh.VertexMemory) && gpu.Mesh.IndexMemory.Equals(mesh.IndexMemory)
                             || gpu.Mesh.VertexMemory.Span.SequenceEqual(mesh.VertexMemory.Span)
                             && gpu.Mesh.IndexMemory.Span.SequenceEqual(mesh.IndexMemory.Span)) gpu.Mesh = mesh;
-                        else { Remove(key); gpu = null; }
+                        else Remove(key);
                     }
-                    if (gpu == null)
+                }
+                var ready = true;
+                foreach (var instance in _required)
+                {
+                    var mesh = instance.Mesh;
+                    var key = (mesh.Source.OwnerFrame, mesh.Key);
+                    if (!_meshes.TryGetValue(key, out var gpu))
                     {
                         while (_residentBytes + mesh.EstimatedBufferBytes > _limits.MaximumMeshBytes)
-                            Remove(_meshes.Keys.First(k => !_visibleKeys.Contains(k)));
+                            Remove(_meshes.Keys.First(k => !_requiredKeys.Contains(k)));
                         gpu = new SpatialGpuMesh(mesh);
                         _meshes.Add(key, gpu); _residentBytes += mesh.EstimatedBufferBytes;
                     }
@@ -189,6 +206,7 @@ internal sealed partial class Clyde
                     ClearOutput(scene.ClearColor);
                     return Result(SpatialRenderStatus.Uploading);
                 }
+                draws += DrawShadows(scene);
                 Bind(_opaque, true);
                 GL.DepthMask(true); GL.ClearDepth(1);
                 GL.ClearColor(scene.ClearColor.X, scene.ClearColor.Y, scene.ClearColor.Z, scene.ClearColor.W);
@@ -211,12 +229,13 @@ internal sealed partial class Clyde
             }
             finally { state.Restore(); _owner.CheckGlError(); }
 
-            SpatialRenderResult Result(SpatialRenderStatus status) => new(status, _visible.Count, draws, _residentBytes, uploaded);
+            SpatialRenderResult Result(SpatialRenderStatus status) => new(status, _visible.Count, draws, _residentBytes, uploaded, _shadowViews.Count);
             void DrawPass(int pass)
             {
                 GL.UseProgram(_forward.Handle);
                 _forward.SetUniform("uViewProjection", camera.ViewProjection, transpose: false);
                 _forward.SetUniform("uAmbient", scene.Ambient); _forward.SetUniform("uTexture", 0); _forward.SetUniform("uPass", pass);
+                SetShadowUniforms();
                 foreach (var instance in _visible)
                 {
                     var mesh = instance.Mesh;
@@ -278,6 +297,7 @@ internal sealed partial class Clyde
                 _forward.SetUniform($"uLightColorKind[{i}]", new Vector4(light.Color, (float) light.Kind));
                 _forward.SetUniform($"uLightDirectionOuter[{i}]", new Vector4(light.Direction, light.OuterConeCosine));
                 _forward.SetUniform($"uLightInner[{i}]", light.InnerConeCosine);
+                _forward.SetUniform($"uShadowBase[{i}]", _shadowBases.GetValueOrDefault(light, -1));
             }
         }
 
@@ -322,6 +342,7 @@ internal sealed partial class Clyde
             foreach (var gpu in _meshes.Values) gpu.Dispose(); _meshes.Clear(); _residentBytes = 0;
             _opaque?.Dispose(); _accumulation?.Dispose(); _revealage?.Dispose(); _output?.Dispose();
             _forward?.Delete(); _composite?.Delete();
+            _shadowProgram?.Delete(); _shadowTarget?.Dispose();
             if (_fullscreenVao != 0) GL.DeleteVertexArray(_fullscreenVao);
             if (_sampler != 0) GL.DeleteSampler(_sampler);
             _owner._spatialRenderers.Remove(this);

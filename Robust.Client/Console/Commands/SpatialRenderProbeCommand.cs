@@ -38,7 +38,8 @@ internal sealed partial class SpatialRenderProbeCommand : IConsoleCommand
         checker[1, 0] = checker[0, 1] = new Rgba32(255, 255, 255, 0);
         using var texture = _clyde.LoadTextureFromImage(checker, "spatial-probe-cutout");
         var scene = Scene(texture);
-        var limits = new SpatialRendererLimits(32 * 1024 * 1024, 4096, 1024 * 1024);
+        var limits = new SpatialRendererLimits(32 * 1024 * 1024, 4096, 1024 * 1024,
+            new SpatialShadowSettings(2, 128, 0.05f, 0.001f));
         var captures = new Dictionary<string, Image<Rgba32>>();
         var report = new Dictionary<string, object> { ["purpose"] = "Engine render qualification; not integrated spatial gameplay", ["target_count_before"] = baseline };
         using (var renderer = _clyde.CreateSpatialRenderer(new Vector2i(800, 600), limits))
@@ -63,7 +64,15 @@ internal sealed partial class SpatialRenderProbeCommand : IConsoleCommand
             } while (result.Status != SpatialRenderStatus.Ready);
             report["upload_frames"] = frames; report["resident_mesh_bytes"] = result.ResidentMeshBytes;
             report["draw_calls"] = result.DrawCalls; report["visible_chunks"] = result.VisibleChunks;
+            report["shadow_faces"] = result.ShadowFaces;
+            if (result.ShadowFaces != 12) throw new InvalidOperationException("Shadow selection did not contain both fixture lights.");
             renderer.Target.CopyPixelsToMemory<Rgba32>(image => Capture("spatial-probe", image));
+            var unshadowed = new SpatialRenderScene(scene.Instances, scene.Materials,
+                scene.Lights.Select(light => light with { CastsShadows = false }), scene.Ambient, scene.ClearColor);
+            result = renderer.Render(camera, unshadowed);
+            if (result.Status != SpatialRenderStatus.Ready || result.ShadowFaces != 0)
+                throw new InvalidOperationException("Disabling shadows changed mandatory scene readiness.");
+            renderer.Target.CopyPixelsToMemory<Rgba32>(image => Capture("spatial-probe-unshadowed", image));
             for (var i = 0; i < 8; i++) renderer.ReloadShaders();
             report["shader_reloads"] = 8;
             var reverse = new SpatialRenderScene(scene.Instances.Reverse(), scene.Materials, scene.Lights, scene.Ambient, scene.ClearColor);
@@ -79,6 +88,8 @@ internal sealed partial class SpatialRenderProbeCommand : IConsoleCommand
                 handle.DrawingHandleScreen.DrawRect(new UIBox2(40, 10, 60, 30), new Color(0f, 1f, 0f));
             });
             composed.CopyPixelsToMemory<Rgba32>(image => Capture("spatial-probe-ui", image));
+            CheckReplacementBudget(camera);
+            report["growing_and_shrinking_mesh_budget_correct"] = true;
         }
         var source = scene.Instances.First(i => i.Mesh.Source.OwnerFrame == new EntityUid(1)).Mesh.Source;
         var sprite = _entities.SpawnEntity("debugRotation4", Robust.Shared.Map.MapCoordinates.Nullspace);
@@ -102,6 +113,7 @@ internal sealed partial class SpatialRenderProbeCommand : IConsoleCommand
             }
         }
         finally { _entities.DeleteEntity(sprite); }
+        CheckOffscreenShadow(Capture, report);
         // Repeated independent views may not retain render targets after disposal.
         for (var i = 0; i < 8; i++)
         {
@@ -118,17 +130,23 @@ internal sealed partial class SpatialRenderProbeCommand : IConsoleCommand
         {
             using (var stream = _resources.UserData.OpenWrite(new ResPath($"/{name}.png"))) image.SaveAsPng(stream);
             captures.Add(name, image);
-            if (captures.Count != 5) return;
+            if (captures.Count != 8) return;
             try
             {
                 var original = captures["spatial-probe"];
                 var reversed = captures["spatial-probe-reversed"];
+                var unshadowedImage = captures["spatial-probe-unshadowed"];
                 var maxDifference = 0;
+                var shadowedPixels = 0;
+                var brighterPixels = 0;
                 for (var y = 0; y < original.Height; y++)
                 for (var x = 0; x < original.Width; x++)
                 {
                     var a = original[x, y]; var b = reversed[x, y];
                     maxDifference = Math.Max(maxDifference, Math.Max(Math.Abs(a.R - b.R), Math.Max(Math.Abs(a.G - b.G), Math.Abs(a.B - b.B))));
+                    var lit = unshadowedImage[x, y];
+                    if (lit.R - a.R > 5 || lit.G - a.G > 5 || lit.B - a.B > 5) shadowedPixels++;
+                    if (a.R - lit.R > 2 || a.G - lit.G > 2 || a.B - lit.B > 2) brighterPixels++;
                 }
                 var ui = captures["spatial-probe-ui"];
                 var red = ui[15, 15]; var green = ui[45, 15];
@@ -143,13 +161,66 @@ internal sealed partial class SpatialRenderProbeCommand : IConsoleCommand
                 report["slice_floor_and_opening_correct"] = slices;
                 report["slice_original_sprite_filtered"] = spriteFiltered;
                 report["slice_diagnostic_correct"] = diagnostic;
-                report["passed"] = maxDifference <= 2 && markers && slices && spriteFiltered && diagnostic;
+                report["shadowed_pixels"] = shadowedPixels;
+                report["shadow_brighter_pixels"] = brighterPixels;
+                var shadows = shadowedPixels > 100 && brighterPixels == 0;
+                var offscreen = captures["spatial-probe-offscreen-shadow"];
+                var offscreenLit = captures["spatial-probe-offscreen-lit"];
+                var offscreenPixels = 0;
+                for (var y = 0; y < offscreen.Height; y++)
+                for (var x = 0; x < offscreen.Width; x++)
+                    if (offscreenLit[x, y].R - offscreen[x, y].R > 5) offscreenPixels++;
+                report["offscreen_caster_shadowed_pixels"] = offscreenPixels;
+                shadows &= offscreenPixels > 20;
+                report["passed"] = maxDifference <= 2 && markers && slices && spriteFiltered && diagnostic && shadows;
                 _resources.UserData.WriteAllText(new ResPath("/spatial-probe.json"), JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
-                if (maxDifference > 2 || !markers || !slices || !spriteFiltered || !diagnostic)
+                if (maxDifference > 2 || !markers || !slices || !spriteFiltered || !diagnostic || !shadows)
                     throw new InvalidOperationException("Spatial render qualification failed; inspect spatial-probe.json.");
                 Logger.InfoS("spatial.render", "Spatial render probe passed; screenshots and report saved in user data.");
             }
             finally { foreach (var captured in captures.Values) captured.Dispose(); }
+        }
+    }
+
+    private void CheckReplacementBudget(PerspectiveCamera camera)
+    {
+        var first = BudgetScene(false);
+        var changed = BudgetScene(true);
+        var bytes = first.Instances.Sum(i => i.Mesh.EstimatedBufferBytes);
+        if (bytes != changed.Instances.Sum(i => i.Mesh.EstimatedBufferBytes))
+            throw new InvalidOperationException("Invalid replacement budget fixture.");
+        using var renderer = _clyde.CreateSpatialRenderer(new Vector2i(64, 64), new SpatialRendererLimits(bytes, (int) bytes, 4096));
+        foreach (var scene in new[] { first, changed })
+        {
+            var result = renderer.Render(camera, scene);
+            if (result.Status != SpatialRenderStatus.Ready || result.ResidentMeshBytes != bytes || result.VisibleChunks != 2)
+                throw new InvalidOperationException("Simultaneous growing/shrinking meshes exceeded their unchanged GPU budget.");
+        }
+
+        static SpatialRenderScene BudgetScene(bool swapped)
+        {
+            var instances = new List<SpatialRenderInstance>();
+            var layer = new LayerId(1);
+            for (var owner = 1; owner <= 2; owner++)
+            {
+                var frame = new EntityUid(owner);
+                var big = (owner == 2) != swapped;
+                var slabs = new List<SlabSurface>();
+                for (var n = 0; n < (big ? 64 : 1); n++)
+                {
+                    var x = n % 8; var y = n / 8 + 2;
+                    slabs.Add(new SlabSurface(new SpatialSurfaceReference(frame, new SurfaceId((uint) n + 1)), layer,
+                        new Box2(x, y, x + 0.75f, y + 0.75f), 0, 0.25f, materialProfile: "budget"));
+                }
+                var source = new SpatialGeometrySnapshot(frame, 0,
+                    new Dictionary<LayerId, LayerDefinition> { [layer] = new(0, "Budget") },
+                    Array.Empty<BoundarySegment>(), slabs, Array.Empty<SpatialTileChunk>());
+                foreach (var mesh in SpatialChunkMeshBuilder.Build(source, 16, new SpatialMeshBuildLimits(4, 1000)))
+                    instances.Add(new SpatialRenderInstance(mesh, RigidTransform3.Identity));
+            }
+            return new SpatialRenderScene(instances,
+                new Dictionary<string, SpatialRenderMaterial> { ["budget"] = new(null, Vector4.One, Vector3.Zero, Vector2.One) },
+                Array.Empty<SpatialRenderLight>(), Vector3.One, Vector4.Zero);
         }
     }
 
@@ -186,9 +257,9 @@ internal sealed partial class SpatialRenderProbeCommand : IConsoleCommand
         };
         return new SpatialRenderScene(instances, materials, new[]
         {
-            new SpatialRenderLight(SpatialLightKind.Point, new Vector3(0, 1, 5), 15, new Vector3(1, 0.9f, 0.7f), Vector3.Zero),
+            new SpatialRenderLight(SpatialLightKind.Point, new Vector3(0, 1, 5), 15, new Vector3(1, 0.9f, 0.7f), Vector3.Zero, CastsShadows: true),
             new SpatialRenderLight(SpatialLightKind.Spot, new Vector3(5, -3, 6), 20, new Vector3(0.2f, 0.4f, 1),
-                Vector3.Normalize(new Vector3(-5, 7, -6)), 0.9f, 0.65f)
+                Vector3.Normalize(new Vector3(-5, 7, -6)), 0.9f, 0.65f, CastsShadows: true)
         }, new Vector3(0.22f), new Vector4(0.015f, 0.02f, 0.03f, 1));
         SpatialRenderMaterial Material(Vector4 color) => new(null, color, Vector3.Zero, Vector2.One);
         SlabSurface Slab(EntityUid owner, uint id, Box2 footprint, float top, float thickness, string material)

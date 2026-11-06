@@ -31,9 +31,30 @@ chunk. Alpha-cutout geometry remains in the depth-writing pass. Mesh source IDs,
 surface revisions and material profiles survive batching for diagnostics/picking.
 
 Raw GL state is saved/restored around spatial work. Queued 2D drawing is flushed
-before borrowing the context. ReloadShaders compiles both replacement programs
+before borrowing the context. ReloadShaders compiles all replacement programs
 before exchanging either one, retaining the working pair on failure. The existing
 resource watcher also handles spatial `.vert`/`.frag` edits.
+
+## Bounded shadows
+
+Mark selected point/spot lights with CastsShadows and configure
+`SpatialRendererLimits.Shadows`. The desktop uniform budget permits at most four
+shadowed sources, each with six perspective faces. Resolution, near plane and
+depth bias are explicit quality inputs. The complete atlas must fit MaximumPixels;
+this limit includes all six faces per light. Zero lights disables this pass.
+
+Opaque and alpha-cutout geometry writes a nearest-occluder depth atlas. Lighting
+uses four clamped depth comparisons per lookup; atlas-face edges cannot sample the
+adjacent tile. Transparent surfaces receive illumination but do not cast colored
+transmission shadows. Ambient/emission remain independent of direct shadows.
+Selection is deterministic by normalized camera distance. Spot illumination keeps
+its cone; its shadow projection uses the same six-face representation as point
+sources, including wide spot cones.
+
+Shadow caster selection includes authorized geometry outside the main camera
+frustum. Its meshes count toward residency and upload limits. Disabling shadows
+does not remove any visible mandatory geometry, change physics, or broaden the
+authorized input selection. Different shadow quality is not a visibility policy.
 
 ## CPU and GPU budgets
 
@@ -82,6 +103,8 @@ debug prototypes available. It writes PNGs and a JSON report in user data. It re
 one semantic scene in perspective and two flat layers, uses an existing directional
 RSI sprite, reverses transparency submission, reloads shaders eight times, composes
 UI markers, checks layer filtering/openings and exercises target resize/disposal.
+It also compares shadows on/off, checks a completely off-camera occluder, and swaps
+a growing/shrinking mesh pair at an unchanged exact GPU residency limit.
 Do not run the qualification loop during a live performance measurement.
 
 The standalone local fixture used `--self-contained`, desktop
@@ -90,7 +113,7 @@ and starting ECS, and an Xvfb display. This environment needs SDL3's
 `SDL_VIDEO_FORCE_EGL=1` to obtain an sRGB-capable desktop context. This is an
 environment-specific launcher setting, not a change to normal game startup.
 
-This implementation does not close E05/G4. Budgeted shadows, distant texture/mip
+This implementation does not close E05/G4. Distant texture/mip
 qualification, full game viewport/view-switch integration and broader performance
 acceptance remain. E06 perspective asset profiles, composition caches, effects and
 XYZ audio, as well as content resource bindings and gameplay integration, remain
