@@ -706,8 +706,16 @@ public abstract partial class SharedTransformSystem
 
     #region Local Rotation
 
+    internal static void ValidatePosition(Vector2 position)
+    {
+        if (!float.IsFinite(position.X) || !float.IsFinite(position.Y))
+            throw new ArgumentOutOfRangeException(nameof(position), "Transform position must be finite.");
+    }
+
     internal static Angle NormalizeRotation(Angle rotation)
     {
+        if (!double.IsFinite(rotation.Theta))
+            throw new ArgumentOutOfRangeException(nameof(rotation), "Transform rotation must be finite.");
         return rotation.Reduced();
     }
 
@@ -778,7 +786,11 @@ public abstract partial class SharedTransformSystem
         TransformComponent? oldParent = null)
     {
         var (uid, xform, meta) = entity;
+        // Validate before unanchoring, dirtying, or changing any part of the pose.
         // NOTE: This setter must be callable from before initialize.
+        ValidatePosition(value.Position);
+        if (rotation != null)
+            rotation = NormalizeRotation(rotation.Value);
 
         if (xform.ParentUid == value.EntityId
             && xform._localPosition.EqualsApprox(value.Position)
@@ -786,9 +798,6 @@ public abstract partial class SharedTransformSystem
         {
             return;
         }
-
-        if (xform.Anchored && unanchor)
-            Unanchor(uid, xform);
 
         if (value.EntityId != xform.ParentUid && value.EntityId.IsValid())
         {
@@ -804,6 +813,55 @@ public abstract partial class SharedTransformSystem
                 return;
             }
         }
+
+        if (value.EntityId != xform._parent)
+        {
+            if (value.EntityId == uid)
+            {
+                throw new InvalidOperationException($"Attempted to parent an entity to itself: {ToPrettyString(uid)}");
+            }
+
+            if (value.EntityId.IsValid())
+            {
+                if (!XformQuery.Resolve(value.EntityId, ref newParent, false))
+                {
+                    throw new InvalidOperationException($"Attempted to parent entity {ToPrettyString(uid)} to non-existent entity {value.EntityId}");
+                }
+
+                if (newParent.LifeStage >= ComponentLifeStage.Stopping || LifeStage(value.EntityId) >= EntityLifeStage.Terminating)
+                {
+                    throw new InvalidOperationException($"Attempted to re-parent to a terminating object. Entity: {ToPrettyString(uid)}, new parent: {ToPrettyString(value.EntityId)}");
+                }
+
+                // Check even before map ids are initialized.
+                var recursiveUid = value.EntityId;
+                var recursiveXform = newParent;
+                while (recursiveXform.ParentUid.IsValid())
+                {
+                    if (recursiveXform.ParentUid == uid)
+                    {
+                        if (!_gameTiming.ApplyingState)
+                            throw new InvalidOperationException($"Attempted to parent an entity to one of its descendants! {ToPrettyString(uid)}. new parent: {ToPrettyString(value.EntityId)}");
+
+                        // Client is halfway through applying server state, which can sometimes lead to a temporarily circular transform hierarchy.
+                        // E.g., client is holding a foldable bed and predicts dropping & sitting in it -> reset to holding it -> bed is parent of player and vice versa.
+                        // Even though its temporary, this can still cause the client to get stuck in infinite loops while applying the game state.
+                        // So we will just break the loop by detaching to null and just trusting that the loop wasn't actually a real feature of the server state.
+                        Log.Warning($"Encountered circular transform hierarchy while applying state for entity: {ToPrettyString(uid)}. Detaching child to null: {ToPrettyString(recursiveUid)}");
+                        DetachEntity(recursiveUid, recursiveXform);
+                        break;
+                    }
+
+                    recursiveUid = recursiveXform.ParentUid;
+                    recursiveXform = XformQuery.GetComponent(recursiveUid);
+                }
+
+                InitializeMapUid(value.EntityId, newParent);
+            }
+        }
+
+        if (xform.Anchored && unanchor)
+            Unanchor(uid, xform);
 
         var oldParentUid = xform._parent;
         var oldPosition = xform._localPosition;
@@ -842,61 +900,6 @@ public abstract partial class SharedTransformSystem
         // Perform parent change logic
         if (value.EntityId != xform._parent)
         {
-            if (value.EntityId == uid)
-            {
-                DetachEntity(uid, xform);
-                if (_netMan.IsServer || IsClientSide(uid))
-                    QueueDel(uid);
-                throw new InvalidOperationException($"Attempted to parent an entity to itself: {ToPrettyString(uid)}");
-            }
-
-            if (value.EntityId.IsValid())
-            {
-                if (!XformQuery.Resolve(value.EntityId, ref newParent, false))
-                {
-                    DetachEntity(uid, xform);
-                    if (_netMan.IsServer || IsClientSide(uid))
-                        QueueDel(uid);
-                    throw new InvalidOperationException($"Attempted to parent entity {ToPrettyString(uid)} to non-existent entity {value.EntityId}");
-                }
-
-                if (newParent.LifeStage >= ComponentLifeStage.Stopping || LifeStage(value.EntityId) >= EntityLifeStage.Terminating)
-                {
-                    DetachEntity(uid, xform);
-                    if (_netMan.IsServer || IsClientSide(uid))
-                        QueueDel(uid);
-                    throw new InvalidOperationException($"Attempted to re-parent to a terminating object. Entity: {ToPrettyString(uid)}, new parent: {ToPrettyString(value.EntityId)}");
-                }
-
-                InitializeMapUid(value.EntityId, newParent);
-
-                // Check for recursive/circular transform hierarchies.
-                if (xform.MapUid == newParent.MapUid)
-                {
-                    var recursiveUid = value.EntityId;
-                    var recursiveXform = newParent;
-                    while (recursiveXform.ParentUid.IsValid())
-                    {
-                        if (recursiveXform.ParentUid == uid)
-                        {
-                            if (!_gameTiming.ApplyingState)
-                                throw new InvalidOperationException($"Attempted to parent an entity to one of its descendants! {ToPrettyString(uid)}. new parent: {ToPrettyString(value.EntityId)}");
-
-                            // Client is halfway through applying server state, which can sometimes lead to a temporarily circular transform hierarchy.
-                            // E.g., client is holding a foldable bed and predicts dropping & sitting in it -> reset to holding it -> bed is parent of player and vice versa.
-                            // Even though its temporary, this can still cause the client to get stuck in infinite loops while applying the game state.
-                            // So we will just break the loop by detaching to null and just trusting that the loop wasn't actually a real feature of the server state.
-                            Log.Warning($"Encountered circular transform hierarchy while applying state for entity: {ToPrettyString(uid)}. Detaching child to null: {ToPrettyString(recursiveUid)}");
-                            DetachEntity(recursiveUid, recursiveXform);
-                            break;
-                        }
-
-                        recursiveUid = recursiveXform.ParentUid;
-                        recursiveXform = XformQuery.GetComponent(recursiveUid);
-                    }
-                }
-            }
-
             if (xform._parent.IsValid())
                 XformQuery.Resolve(xform._parent, ref oldParent);
 
@@ -1665,6 +1668,9 @@ public abstract partial class SharedTransformSystem
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public virtual void SetLocalPositionRotation(EntityUid uid, Vector2 pos, Angle rot, TransformComponent? xform = null)
     {
+        ValidatePosition(pos);
+        rot = NormalizeRotation(rot);
+
         if (!XformQuery.Resolve(uid, ref xform))
             return;
 

@@ -159,10 +159,10 @@ namespace Robust.Shared.GameObjects
             [Obsolete("Use SharedTransformSystem.SetLocalRotation() instead")]
             set
             {
+                value = SharedTransformSystem.NormalizeRotation(value);
+
                 if(_noLocalRotation)
                     return;
-
-                value = SharedTransformSystem.NormalizeRotation(value);
 
                 if (_localRotation.EqualsApprox(value))
                     return;
@@ -345,6 +345,8 @@ namespace Robust.Shared.GameObjects
             [Obsolete("Use SharedTransformSystem.SetLocalPosition() instead")]
             set
             {
+                SharedTransformSystem.ValidatePosition(value);
+
                 if(Anchored)
                     return;
 

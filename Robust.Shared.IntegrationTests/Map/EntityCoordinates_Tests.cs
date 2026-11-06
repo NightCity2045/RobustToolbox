@@ -72,10 +72,8 @@ namespace Robust.UnitTesting.Shared.Map
         public void IsValid_NonFiniteVector_False(float x, float y)
         {
             var entityManager = IoCManager.Resolve<IEntityManager>();
-            entityManager.System<SharedMapSystem>().CreateMap(out var mapId);
-
-            var newEnt = entityManager.CreateEntityUninitialized(null, new MapCoordinates(new Vector2(x, y), mapId));
-            var coords = IoCManager.Resolve<IEntityManager>().GetComponent<TransformComponent>(newEnt).Coordinates;
+            var mapEntity = entityManager.System<SharedMapSystem>().CreateMap(out _);
+            var coords = new EntityCoordinates(mapEntity, new Vector2(x, y));
 
             Assert.That(coords.IsValid(entityManager), Is.False);
         }

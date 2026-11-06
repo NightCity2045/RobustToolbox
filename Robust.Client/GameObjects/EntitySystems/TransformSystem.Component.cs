@@ -10,6 +10,8 @@ public sealed partial class TransformSystem
 {
     public override void SetLocalPosition(EntityUid uid, Vector2 value, TransformComponent? xform = null)
     {
+        ValidatePosition(value);
+
         if (!XformQuery.Resolve(uid, ref xform))
             return;
 
@@ -20,6 +22,8 @@ public sealed partial class TransformSystem
 
     public override void SetLocalRotation(EntityUid uid, Angle value, TransformComponent? xform = null)
     {
+        value = NormalizeRotation(value);
+
         if (!XformQuery.Resolve(uid, ref xform))
             return;
 
@@ -30,6 +34,9 @@ public sealed partial class TransformSystem
 
     public override void SetLocalPositionRotation(EntityUid uid, Vector2 pos, Angle rot, TransformComponent? xform = null)
     {
+        ValidatePosition(pos);
+        rot = NormalizeRotation(rot);
+
         if (!XformQuery.Resolve(uid, ref xform))
             return;
 

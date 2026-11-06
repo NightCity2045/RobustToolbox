@@ -343,6 +343,10 @@ namespace Robust.Shared.GameObjects
         /// <inheritdoc />
         public virtual EntityUid CreateEntityUninitialized(string? prototypeName, EntityCoordinates coordinates, ComponentRegistry? overrides = null, Angle rotation = default)
         {
+            // Reject invalid input before allocating an entity that the caller cannot clean up.
+            SharedTransformSystem.ValidatePosition(coordinates.Position);
+            rotation = SharedTransformSystem.NormalizeRotation(rotation);
+
             var newEntity = CreateEntity(prototypeName, out _, overrides);
 
             var xformComp = TransformQuery.GetComponent(newEntity);
@@ -353,6 +357,10 @@ namespace Robust.Shared.GameObjects
         /// <inheritdoc />
         public virtual EntityUid CreateEntityUninitialized(string? prototypeName, MapCoordinates coordinates, ComponentRegistry? overrides = null, Angle rotation = default!)
         {
+            // Reject invalid input before allocating an entity that the caller cannot clean up.
+            SharedTransformSystem.ValidatePosition(coordinates.Position);
+            rotation = SharedTransformSystem.NormalizeRotation(rotation);
+
             var newEntity = CreateEntity(prototypeName, out _, overrides);
             var transform = TransformQuery.GetComponent(newEntity);
 
