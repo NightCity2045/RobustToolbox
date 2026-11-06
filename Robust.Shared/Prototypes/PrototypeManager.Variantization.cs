@@ -85,16 +85,22 @@ public partial class PrototypeManager
     /// <param name="collectionVariants">A list of prototype variants derived from the same source prototype.</param>
     private void RegisterVariantCollection(KindData kindData, List<string> collectionVariants)
     {
-        if (kindData.UnfrozenVariants == null)
+        // ExtractMapping runs concurrently for every file in LoadDirectory.
+        // Protect initialization, growth and insertion together; concurrent writes
+        // can otherwise corrupt Dictionary even when every variant ID is unique.
+        lock (kindData)
         {
-            kindData.UnfrozenVariants = kindData.Variants.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.ToList());
-        }
+            if (kindData.UnfrozenVariants == null)
+            {
+                kindData.UnfrozenVariants = kindData.Variants.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.ToList());
+            }
 
-        kindData.UnfrozenVariants.EnsureCapacity(kindData.UnfrozenVariants.Count + collectionVariants.Count);
+            kindData.UnfrozenVariants.EnsureCapacity(kindData.UnfrozenVariants.Count + collectionVariants.Count);
 
-        foreach (var collectionMember in collectionVariants)
-        {
-            kindData.UnfrozenVariants[collectionMember] = collectionVariants;
+            foreach (var collectionMember in collectionVariants)
+            {
+                kindData.UnfrozenVariants[collectionMember] = collectionVariants;
+            }
         }
     }
 
