@@ -18,6 +18,79 @@ namespace Robust.UnitTesting.Server.GameStates;
 [TestFixture]
 public sealed class SpatialPoseHistoryTest : RobustIntegrationTest
 {
+#if DEBUG
+    [Test]
+    public async Task DroppedStatesAndPvsReentryKeepTheParentBatchCoherent()
+    {
+        await using var pair = await StartConnectedPair();
+        var (client, server) = pair;
+        await RunTicksSync(server, client, 10);
+        EntityUid world = default, viewer = default, parent = default, child = default;
+        NetEntity worldNet = default, childNet = default;
+        await server.WaitPost(() =>
+        {
+            server.CfgMan.SetCVar(CVars.NetPVS, true);
+            world = server.System<SharedSpatialSystem>().CreateWorld();
+            parent = server.EntMan.SpawnAttachedTo(null, world,
+                new RigidTransform3(new Vector3(2, 3, 4), Quaternion.Identity));
+            child = server.EntMan.SpawnAttachedTo(null, parent,
+                new RigidTransform3(new Vector3(1, 0, 1), Quaternion.Identity));
+            viewer = server.EntMan.SpawnAttachedTo(null, world, RigidTransform3.Identity);
+            worldNet = server.EntMan.GetNetEntity(world); childNet = server.EntMan.GetNetEntity(child);
+            var session = server.PlayerMan.Sessions.First();
+            server.PlayerMan.SetAttachedEntity(session, viewer); server.PlayerMan.JoinGame(session);
+        });
+        await RunTicksSync(server, client, 20);
+        SpatialPoseHistory history = default!;
+        EntityUid localChild = default;
+        var states = (ClientGameStateManager) client.ResolveDependency<IClientGameStateManager>();
+        await client.WaitPost(() =>
+        {
+            localChild = client.EntMan.GetEntity(childNet);
+            history = client.System<SpatialPoseHistorySystem>().Track(client.EntMan.GetEntity(worldNet),
+                new[] { localChild }, new SpatialPoseTimelineLimits(32, 8, 256));
+        });
+        await RunTicksSync(server, client, 5);
+        await client.WaitPost(() => states.DropStates = true);
+        await RunTicksSync(server, client, 10);
+        uint heldTick = 0;
+        RigidTransform3 heldPose = default;
+        await client.WaitAssertion(() =>
+        {
+            heldTick = history.LastAppliedTick!.Value.Value;
+            Assert.That(history.TrySample(localChild, double.MaxValue, out heldPose), Is.True);
+        });
+        await server.WaitPost(() => server.System<SharedTransformSystem>().SetLocalPose(viewer,
+            new RigidTransform3(new Vector3(200, 200, 0), Quaternion.Identity)));
+        await RunTicksSync(server, client, 10);
+        await client.WaitAssertion(() =>
+        {
+            Assert.That(states.IsQueuedForDetach(childNet), Is.True);
+            Assert.That(history.LastAppliedTick!.Value.Value, Is.EqualTo(heldTick));
+            Assert.That(history.TrySample(localChild, double.MaxValue, out var pose), Is.True);
+            Assert.That(pose, Is.EqualTo(heldPose), "No new authoritative pose is invented while states are dropped.");
+        });
+        await server.WaitPost(() =>
+        {
+            server.System<SharedTransformSystem>().SetLocalPose(parent,
+                new RigidTransform3(new Vector3(4, 5, 6), Quaternion.CreateFromAxisAngle(Vector3.UnitZ, MathF.PI / 2)));
+            server.System<SharedTransformSystem>().SetLocalPose(viewer, RigidTransform3.Identity);
+        });
+        await RunTicksSync(server, client, 5);
+        await client.WaitPost(() => states.DropStates = false);
+        await RunTicksSync(server, client, 20);
+        await client.WaitAssertion(() =>
+        {
+            Assert.That(history.LastAppliedTick!.Value.Value, Is.GreaterThan(heldTick));
+            Assert.That(states.IsQueuedForDetach(childNet), Is.False);
+            Assert.That(client.EntMan.GetEntity(childNet), Is.EqualTo(localChild));
+            Assert.That(history.TrySample(localChild, double.MaxValue, out var pose), Is.True);
+            Assert.That(Vector3.Distance(pose.Position, new Vector3(4, 6, 7)), Is.LessThan(1e-4));
+            history.Dispose();
+        });
+    }
+#endif
+
     [TestCase(true)]
     [TestCase(false)]
     public async Task CoherentNetworkCaptureIndependentBodiesSelectionAndDisconnect(bool pvs)

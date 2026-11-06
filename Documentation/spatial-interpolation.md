@@ -53,3 +53,7 @@ and reset. `SpatialPoseHistoryTest` exercises actual server/client replication,
 the authoritative capture boundary, dependency budgets, selection revocation,
 client-local exclusion, world transfer, deletion and disconnect with PVS both
 enabled and disabled, without modifying canonical transforms to render.
+Its DEBUG loss scenario drops normal states while reliable PVS-leave messages
+queue, changes the parent pose during the outage, and verifies coherent recovery
+with the same entity identity. This deterministic outage test does not replace
+RTT/jitter or complete local-prediction qualification.
