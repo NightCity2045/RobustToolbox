@@ -12,7 +12,7 @@ internal sealed partial class BepuSpatialPhysicsBackend
         if (!SpatialBackendBodyDefinition.Finite(worldImpulse) || !SpatialBackendBodyDefinition.Finite(worldPoint))
             throw new ArgumentException("Impulse and application point must be finite.");
         var entry = _entries[id];
-        if (entry.Definition.Motion != SpatialBackendMotion.Dynamic)
+        if (entry.Definition.Motion != SpatialBackendMotion.Dynamic || entry.Paused)
             throw new InvalidOperationException("Only a dynamic body accepts an impulse.");
         var body = _simulation.Bodies.GetBodyReference(entry.Body);
         var velocity = body.Velocity;

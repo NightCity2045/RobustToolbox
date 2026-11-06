@@ -27,7 +27,8 @@ internal sealed partial class BepuSpatialPhysicsBackend
         definition.Validate();
         var a = _entries[definition.BodyA];
         var b = _entries[definition.BodyB];
-        if (a.Definition.Motion != SpatialBackendMotion.Dynamic && b.Definition.Motion != SpatialBackendMotion.Dynamic)
+        if ((a.Definition.Motion != SpatialBackendMotion.Dynamic || a.Paused)
+            && (b.Definition.Motion != SpatialBackendMotion.Dynamic || b.Paused))
             throw new InvalidOperationException("A constraint requires at least one dynamic participant.");
         var localA = definition.LocalAnchorA - a.Center;
         var localB = definition.LocalAnchorB - b.Center;

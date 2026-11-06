@@ -6,7 +6,7 @@ handles. It accepts neutral body definitions and returns neutral body states and
 source-qualified ray hits. `SharedSpatialPhysicsSystem` connects this backend to
 explicit spatial world profiles and ECS bodies. The ordinary content maps and
 prototypes have not been migrated or enabled by this engine change. Motor,
-contact events, client collision streaming
+client collision streaming
 and prediction remain required integration work.
 
 Static, dynamic and kinematic bodies use compound box, sphere and Z-axis capsule
@@ -174,3 +174,34 @@ referencing constraint components without deleting the content-owned link entity
 Map save/restore/clone remaps both participants; no backend handle is serialized.
 Network states use NetEntity references and initialize client definitions without
 starting a second authoritative solver. Client prediction remains pending.
+
+## Contact transitions
+
+`SpatialContactStarted` and `SpatialContactEnded` are authoritative directed
+notifications after the tick's canonical poses and velocities have been committed.
+Each includes both semantic sources, material profiles/revisions, world point,
+normal toward the recipient, penetration depth and pre-solve relative point
+velocity. An end retains its last touching witness; it does not describe a new
+impact. Game damage and support/landing policy are not implemented by these events.
+
+BEPU child callbacks run before nonconvex reduction adds child offsets. The adapter
+converts witnesses using the actual rotated compound-child origin and accounts for
+center-of-mass angular velocity. New speculative proximity alone does not start a
+touch. Existing contacts have a 0.1 mm separation hysteresis to avoid transitions
+caused by numerical roundoff at rest. Contact retention is initialized after BEPU's
+sleep stage, so a body falling asleep during this tick does not end its contacts.
+
+The ECS layer aggregates convex-part transitions by world and semantic source pair.
+A seam in one slab therefore cannot produce duplicate gameplay impacts. Transient
+start/end pairs remain observable, including when a move handler removes a body
+before notifications. Event delivery snapshots its work so handlers can delete a
+body or world safely. World teardown releases the semantic contact registry.
+
+Pausing a dynamic body now preserves its solver identity and shape, freezing it
+through zero inertia/velocity. Canonical velocities remain available for resume.
+Eligible connections are rebuilt at the fixed boundary after the inertia change.
+Existing frozen contacts against static geometry persist until geometry changes;
+sleep, pause and resume do not manufacture a fresh collision. Queries continue to
+see the frozen collider. Backend and ECS tests cover sleep/pause, surface seams,
+rotated offset parts, deletion from event handlers and 300 m/s thin-wall contacts
+at both 30 and 60 Hz.

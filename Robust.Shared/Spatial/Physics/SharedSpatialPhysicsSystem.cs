@@ -61,6 +61,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
         _bindings.Clear();
         _constraintBindings.Clear();
         _constraintComponents.Clear();
+        _semanticContacts.Clear();
         base.Shutdown();
     }
 
@@ -149,6 +150,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
             });
         }
         finally { _committing = false; }
+        PublishContacts();
     }
 
     private void OnWorldStartup(EntityUid uid, SpatialPhysicsWorldComponent component, ComponentStartup args)
@@ -166,6 +168,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
 
     private void OnWorldShutdown(EntityUid uid, SpatialPhysicsWorldComponent component, ComponentShutdown args)
     {
+        ForgetWorldContacts(uid);
         if (!_worlds.Remove(uid, out var backend))
             return;
         foreach (var binding in _bindings.Values.Where(b => b.World == uid).ToArray())
@@ -301,8 +304,16 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
         var paused = hasBody && MetaData(uid).EntityPaused;
         var state = new SpatialBackendState(_transforms.GetWorldPose(uid), paused ? Vector3.Zero : linear,
             paused ? Vector3.Zero : angular);
-        if (_bindings.TryGetValue(uid, out var existing) && existing.World == map && existing.Paused == paused)
+        if (_bindings.TryGetValue(uid, out var existing) && existing.World == map)
         {
+            if (existing.Paused != paused)
+            {
+                if (definition.Owner == SpatialMotionOwner.DynamicBody)
+                    backend.SetPaused(existing.Body, paused);
+                _bindings[uid] = existing with { Paused = paused };
+            }
+            if (backend.GetState(existing.Body) == state)
+                return;
             backend.SetState(existing.Body, state);
             return;
         }
@@ -341,9 +352,11 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
             return;
         }
         var backendDefinition = new SpatialBackendBodyDefinition(
-            paused || definition.Owner == SpatialMotionOwner.Static ? SpatialBackendMotion.Static : SpatialBackendMotion.Dynamic,
+            definition.Owner == SpatialMotionOwner.Static ? SpatialBackendMotion.Static : SpatialBackendMotion.Dynamic,
             parts, definition.Mass, definition.Material.ToBackend(), definition.CollisionLayer, definition.CollisionMask);
         var id = backend.AddBody(backendDefinition, state);
+        if (paused && definition.Owner == SpatialMotionOwner.DynamicBody)
+            backend.SetPaused(id, true);
         RemoveBinding(uid);
         _bindings.Add(uid, new Binding(uid, map.Value, id, definition.UseGeometry, revision, paused));
     }

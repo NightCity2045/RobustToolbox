@@ -37,6 +37,8 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
         public float Radius;
         public StaticHandle Static;
         public BodyHandle Body;
+        public BodyInertia DynamicInertia;
+        public bool Paused;
     }
 
     public int BodyCount => _entries.Count;
@@ -49,6 +51,7 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
             throw new ArgumentOutOfRangeException(nameof(substeps));
         _gravity = gravity;
         var timestepper = new DefaultTimestepper();
+        timestepper.Slept += (_, _) => BeginContacts();
         timestepper.BeforeCollisionDetection += ExpandRotatingCompoundBounds;
         _simulation = Simulation.Create(_pool, new Contacts(this), new Integrator(gravity),
             new SolveDescription(solverIterations, substeps), timestepper);
@@ -106,7 +109,7 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
             // their original indices and source identities through ray traversal.
             compound = _simulation.Shapes.Add(new BigCompound(children, _simulation.Shapes, _pool));
             children = default; // The compound owns this buffer now.
-            var entry = new Entry { Id = id, Definition = definition, Shape = compound, Center = center };
+            var entry = new Entry { Id = id, Definition = definition, Shape = compound, Center = center, DynamicInertia = inertia };
             _simulation.Shapes.UpdateBounds(new RigidPose(Vector3.Zero), ref compound, out var localBounds);
             entry.Radius = Vector3.Max(Vector3.Abs(localBounds.Min), Vector3.Abs(localBounds.Max)).Length();
             if (!float.IsFinite(entry.Radius))
@@ -168,6 +171,7 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
         ThrowIfDisposed();
         var entry = _entries[id];
         RemoveBodyConstraints(id);
+        RemoveBodyContacts(id);
         if (entry.Definition.Motion == SpatialBackendMotion.Static)
         {
             _simulation.Statics.Remove(entry.Static);
@@ -202,6 +206,8 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
         ThrowIfDisposed();
         var entry = _entries[id];
         ValidateState(state, entry.Definition.Motion);
+        if (entry.Paused && (state.LinearVelocity != Vector3.Zero || state.AngularVelocity != Vector3.Zero))
+            throw new InvalidOperationException("A frozen solver body cannot receive velocity until resumed.");
         var pose = ToSolverPose(state.Pose, entry.Center);
         var velocity = ToSolverVelocity(state, entry.Center);
         ValidateSolverState(pose, velocity);
@@ -216,6 +222,26 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
             body.UpdateBounds();
         }
         UpdateConstraintAnchors(entry);
+        _changedContactBodies.Add(id);
+    }
+
+    public void SetPaused(SpatialBackendBodyId id, bool paused)
+    {
+        ThrowIfDisposed();
+        var entry = _entries[id];
+        if (entry.Definition.Motion != SpatialBackendMotion.Dynamic)
+            throw new InvalidOperationException("Only a dynamic body's solver inertia can be paused.");
+        if (entry.Paused == paused)
+            return;
+        // BEPU may remove constraints when the last dynamic participant becomes
+        // kinematic. Remove through our own registry first, then ECS rebuilds
+        // eligible canonical connections at the next fixed tick boundary.
+        RemoveBodyConstraints(id);
+        var body = _simulation.Bodies.GetBodyReference(entry.Body);
+        body.SetLocalInertia(paused ? default : entry.DynamicInertia);
+        body.Velocity = default;
+        body.Awake = true;
+        entry.Paused = paused;
     }
 
     public void Step(float fixedDelta)
@@ -224,6 +250,7 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
         if (!float.IsFinite(fixedDelta) || fixedDelta <= 0)
             throw new ArgumentOutOfRangeException(nameof(fixedDelta));
         _simulation.Timestep(fixedDelta);
+        EndContacts();
     }
 
     private unsafe void ExpandRotatingCompoundBounds(float dt, IThreadDispatcher? dispatcher)
@@ -277,6 +304,10 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
             _constraints.Clear();
             _bodyConstraints.Clear();
             _disabledContactPairs.Clear();
+            _contacts.Clear();
+            _stepContacts.Clear();
+            _changedContactBodies.Clear();
+            _contactEvents.Clear();
         }
     }
 
@@ -379,6 +410,10 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
             return true;
         }
         public bool ConfigureContactManifold(int worker, CollidablePair pair, int a, int b,
-            ref ConvexContactManifold manifold) => true;
+            ref ConvexContactManifold manifold)
+        {
+            owner.RecordChildContacts(pair, a, b, ref manifold);
+            return true;
+        }
     }
 }
