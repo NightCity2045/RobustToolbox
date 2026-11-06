@@ -846,48 +846,16 @@ public abstract partial class SharedTransformSystem
 
         if (parent != xform._parent)
         {
-            if (parent == uid)
+            newParent = ValidateParentChange(uid, parent, newParent, out var cycleChild);
+            if (cycleChild is { } child)
             {
-                throw new InvalidOperationException($"Attempted to parent an entity to itself: {ToPrettyString(uid)}");
+                // A valid authoritative update may temporarily reverse a predicted hierarchy.
+                Log.Warning($"Encountered circular transform hierarchy while applying state for entity: {ToPrettyString(uid)}. Detaching child to null: {ToPrettyString(child.Owner)}");
+                DetachEntity(child.Owner, child.Comp);
             }
 
-            if (parent.IsValid())
-            {
-                if (!XformQuery.Resolve(parent, ref newParent, false))
-                {
-                    throw new InvalidOperationException($"Attempted to parent entity {ToPrettyString(uid)} to non-existent entity {parent}");
-                }
-
-                if (newParent.LifeStage >= ComponentLifeStage.Stopping || LifeStage(parent) >= EntityLifeStage.Terminating)
-                {
-                    throw new InvalidOperationException($"Attempted to re-parent to a terminating object. Entity: {ToPrettyString(uid)}, new parent: {ToPrettyString(parent)}");
-                }
-
-                // Check even before map ids are initialized.
-                var recursiveUid = parent;
-                var recursiveXform = newParent;
-                while (recursiveXform.ParentUid.IsValid())
-                {
-                    if (recursiveXform.ParentUid == uid)
-                    {
-                        if (!_gameTiming.ApplyingState)
-                            throw new InvalidOperationException($"Attempted to parent an entity to one of its descendants! {ToPrettyString(uid)}. new parent: {ToPrettyString(parent)}");
-
-                        // Client is halfway through applying server state, which can sometimes lead to a temporarily circular transform hierarchy.
-                        // E.g., client is holding a foldable bed and predicts dropping & sitting in it -> reset to holding it -> bed is parent of player and vice versa.
-                        // Even though its temporary, this can still cause the client to get stuck in infinite loops while applying the game state.
-                        // So we will just break the loop by detaching to null and just trusting that the loop wasn't actually a real feature of the server state.
-                        Log.Warning($"Encountered circular transform hierarchy while applying state for entity: {ToPrettyString(uid)}. Detaching child to null: {ToPrettyString(recursiveUid)}");
-                        DetachEntity(recursiveUid, recursiveXform);
-                        break;
-                    }
-
-                    recursiveUid = recursiveXform.ParentUid;
-                    recursiveXform = XformQuery.GetComponent(recursiveUid);
-                }
-
+            if (newParent != null)
                 InitializeMapUid(parent, newParent);
-            }
         }
 
         if (xform.Anchored && unanchor)
@@ -985,6 +953,40 @@ public abstract partial class SharedTransformSystem
 #endif
         // No need to check for grid traversal since we've already handled it
         RaiseMoveEvent(entity, oldParentUid, oldPose, oldMap, checkTraversal: false);
+    }
+
+    /// <summary>
+    /// Validate a parent request without changing pose, anchor lookups, or the hierarchy.
+    /// State application can plan a temporary-cycle repair, which the commit path executes.
+    /// </summary>
+    private TransformComponent? ValidateParentChange(EntityUid uid, EntityUid parent,
+        TransformComponent? newParent, out Entity<TransformComponent>? cycleChild)
+    {
+        cycleChild = null;
+        if (!parent.IsValid())
+            return null;
+        if (parent == uid)
+            throw new InvalidOperationException($"Attempted to parent an entity to itself: {ToPrettyString(uid)}");
+        if (!XformQuery.Resolve(parent, ref newParent, false))
+            throw new InvalidOperationException($"Attempted to parent entity {ToPrettyString(uid)} to non-existent entity {parent}");
+        if (newParent.LifeStage >= ComponentLifeStage.Stopping || LifeStage(parent) >= EntityLifeStage.Terminating)
+            throw new InvalidOperationException($"Attempted to re-parent to a terminating object. Entity: {ToPrettyString(uid)}, new parent: {ToPrettyString(parent)}");
+
+        var ancestor = parent;
+        var ancestorTransform = newParent;
+        while (ancestorTransform.ParentUid.IsValid())
+        {
+            if (ancestorTransform.ParentUid == uid)
+            {
+                if (!_gameTiming.ApplyingState)
+                    throw new InvalidOperationException($"Attempted to parent an entity to one of its descendants! {ToPrettyString(uid)}. new parent: {ToPrettyString(parent)}");
+                cycleChild = (ancestor, ancestorTransform);
+                break;
+            }
+            ancestor = ancestorTransform.ParentUid;
+            ancestorTransform = XformQuery.GetComponent(ancestor);
+        }
+        return newParent;
     }
 
     public void SetCoordinates(
@@ -1194,6 +1196,8 @@ public abstract partial class SharedTransformSystem
             if (newState.NoLocalRotation && statePose.Rotation != Quaternion.Identity)
                 throw new InvalidOperationException("A no-rotation transform state must have identity orientation.");
             var parent = EnsureEntity<TransformComponent>(newState.ParentID, uid);
+            if (parent != xform.ParentUid)
+                ValidateParentChange(uid, parent, null, out _);
             var oldAnchored = xform.Anchored;
 
             // update actual position data, if required

@@ -53,7 +53,13 @@ height-preserving planar writes, full/delta corrections, a no-rotation transitio
 network byte round trips, two independent loads of an XYZ map, invalid mutations,
 and a connected client's height/pitch interpolation. Legacy map tests also pass.
 Two subsequent tests verify depth-preserving writes on a tilted plane and atomic
-cross-world rejection; all six spatial transform tests pass.
+cross-world rejection. CI run 42165435566 passes on Linux and Windows: 5162 tests
+per platform, plus the separate FULL_RELEASE headless case and packaging.
+Four further regressions verify that rejected network parent states preserve both
+anchor flags and tile lookup membership. Parent validation is shared with local
+writes and runs before state application changes anchors; temporary authoritative
+cycle repair is committed only after validation. All 1226 Shared integration tests
+pass with this additional fix.
 
 E01/G1 is not complete. Spatial-world profiles, stable world/layer/surface IDs,
 diagnostics for implicit planar calls, and full movement ownership/lifecycle

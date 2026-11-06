@@ -175,4 +175,35 @@ public sealed class SpatialTransformTests
         Assert.Throws<InvalidOperationException>(() => transforms.SetPlanarPosition(uid, otherFrame, Vector2.Zero));
         SamePose(transforms.GetWorldPose(uid), before);
     }
+
+    [TestCase(false, false)]
+    [TestCase(false, true)]
+    [TestCase(true, false)]
+    [TestCase(true, true)]
+    public void RejectedNetworkParentPreservesAnchorLookup(bool anchored, bool self)
+    {
+        var sim = RobustServerSimulation.NewSimulation().InitializeInstance();
+        var entities = sim.Resolve<IEntityManager>();
+        var maps = entities.System<SharedMapSystem>();
+        var transforms = entities.System<SharedTransformSystem>();
+        maps.CreateMap(out var mapId);
+        var grid = maps.CreateGridEntity(mapId);
+        maps.SetTile(grid, Vector2i.Zero, new Tile(1));
+        var uid = entities.SpawnAttachedTo(null, new EntityCoordinates(grid, new Vector2(0.5f)));
+        var child = entities.SpawnAttachedTo(null, new EntityCoordinates(uid, Vector2.One));
+        var transform = entities.GetComponent<TransformComponent>(uid);
+        transforms.TryAnchor((uid, transform), anchored);
+        var before = transform.LocalPose;
+        var state = new ComponentHandleState(new TransformComponentState(
+            new Vector3(7, 8, 9), Quaternion.Identity, entities.GetNetEntity(self ? uid : child), false, !anchored), null);
+        Assert.Throws<InvalidOperationException>(() => transforms.OnHandleState(uid, transform, ref state));
+        Assert.Multiple(() =>
+        {
+            Assert.That(transform.Anchored, Is.EqualTo(anchored));
+            Assert.That(maps.IsAnchored(grid, Vector2i.Zero, uid), Is.EqualTo(anchored));
+            Assert.That(transform.ParentUid, Is.EqualTo(grid.Owner));
+            Assert.That(entities.GetComponent<TransformComponent>(child).ParentUid, Is.EqualTo(uid));
+            Assert.That(transform.LocalPose, Is.EqualTo(before));
+        });
+    }
 }
