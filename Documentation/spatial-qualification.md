@@ -25,6 +25,9 @@ a rotating bar sweep that hits between its clear endpoint poses, and a 300m/s sp
 a 0.1m wall. Tests run without GPU or game content. They are not benchmarks.
 The constraint case suspends a dynamic body from a kinematic anchor, verifies
 the retained height, removes the anchor and verifies the released body falls.
+Compound raycasts distinguish solid children from their gap; an initially
+overlapping shape reports a zero-time hit. All eleven cases passed on the Linux
+x64 .NET 10.0.100 functional runner.
 
 CCD qualification exposed two independent settings that must be recorded with
 the eventual physics profile: temporal sweep tolerance versus speed/thickness,
@@ -39,8 +42,8 @@ Do not weaken the collision assertion to qualify a failing profile.
 Reference for those semantics:
 https://github.com/bepu/bepuphysics2/blob/v2.4.0/Documentation/ContinuousCollisionDetection.md
 
-Still required before E00 is closed: overlap and rotating dynamic-body CCD,
-compound cases, loading through the trusted Robust engine path with
+Still required before E00 is closed: rotating dynamic-body CCD,
+loading through the trusted Robust engine path with
 content sandbox enabled, supported platform runs, allocation/performance
 budgets, GPU reference profile and the joint packaging/client acceptance.
 Cross-platform bitwise determinism is not assumed.

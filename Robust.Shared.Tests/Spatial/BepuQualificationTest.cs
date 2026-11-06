@@ -18,6 +18,45 @@ namespace Robust.Shared.Tests.Spatial;
 public sealed class BepuQualificationTest
 {
     [Test]
+    public void CompoundQueryPreservesGapBetweenChildren()
+    {
+        var pool = new BufferPool();
+        try
+        {
+            using var simulation = Simulation.Create(pool, new Contacts(), new Gravity(), new SolveDescription(8, 1));
+            var childShape = simulation.Shapes.Add(new Box(1, 1, 1));
+            pool.Take<CompoundChild>(2, out var children);
+            children[0] = new CompoundChild { ShapeIndex = childShape, LocalPose = new RigidPose(new Vector3(-2, 0, 0)) };
+            children[1] = new CompoundChild { ShapeIndex = childShape, LocalPose = new RigidPose(new Vector3(2, 0, 0)) };
+            simulation.Statics.Add(new StaticDescription(Vector3.Zero, simulation.Shapes.Add(new Compound(children))));
+            var gap = new RayHit { Distance = float.PositiveInfinity };
+            simulation.RayCast(new Vector3(0, 0, 5), -Vector3.UnitZ, 10, ref gap);
+            Assert.That(gap.Distance, Is.EqualTo(float.PositiveInfinity));
+            var solid = new RayHit { Distance = float.PositiveInfinity };
+            simulation.RayCast(new Vector3(2, 0, 5), -Vector3.UnitZ, 10, ref solid);
+            Assert.That(solid.Distance, Is.EqualTo(4.5f).Within(0.001f));
+        }
+        finally { pool.Clear(); }
+    }
+
+    [Test]
+    public void SweepReportsExistingOverlapAtZeroTime()
+    {
+        var pool = new BufferPool();
+        try
+        {
+            using var simulation = Simulation.Create(pool, new Contacts(), new Gravity(), new SolveDescription(8, 1));
+            simulation.Statics.Add(new StaticDescription(Vector3.Zero, simulation.Shapes.Add(new Box(1, 1, 1))));
+            var hit = new SweepHit();
+            simulation.Sweep(new Sphere(0.1f), new RigidPose(Vector3.Zero), new BodyVelocity(Vector3.UnitX),
+                1f / 30, pool, ref hit);
+            Assert.That(hit.Hit, Is.True);
+            Assert.That(hit.Time, Is.Zero);
+        }
+        finally { pool.Clear(); }
+    }
+
+    [Test]
     public void ConstraintHoldsBodyAndReleasesWhenAnchorIsRemoved()
     {
         var pool = new BufferPool();
