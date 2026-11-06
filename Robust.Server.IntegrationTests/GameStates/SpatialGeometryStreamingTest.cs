@@ -11,6 +11,7 @@ using Robust.Shared.Maths;
 using Robust.Shared.Network;
 using Robust.Shared.Spatial;
 using Robust.Shared.Spatial.Networking;
+using Robust.Shared.Spatial.Physics;
 using ClientStreaming = Robust.Client.Spatial.SpatialGeometryStreamingSystem;
 
 namespace Robust.UnitTesting.Server.GameStates;
@@ -159,6 +160,61 @@ public sealed class SpatialGeometryStreamingTest : RobustIntegrationTest
             Assert.That(streaming.TryGetSnapshot(client.EntMan.GetEntity(hiddenFrameNet), out var snapshot), Is.True);
             Assert.That(snapshot!.Slabs.Values.Single().Entity, Is.Not.Null);
             Assert.That(streaming.IsReady(client.EntMan.GetEntity(worldNet), new Box3(new Vector3(-1), new Vector3(1))), Is.True);
+        });
+    }
+
+    [Test]
+    public async Task WorldTransferInvalidatesOldGeometryBeforeInstallingNewCoverage()
+    {
+        await using var pair = await StartConnectedPair();
+        var (client, server) = pair;
+        await RunTicksSync(server, client, 10);
+        EntityUid source = default, frame = default, viewer = default;
+        NetEntity frameNet = default, destinationNet = default;
+        await server.WaitPost(() =>
+        {
+            source = server.System<SharedSpatialSystem>().CreateWorld();
+            server.System<SharedSpatialPhysicsSystem>().EnablePhysics(source);
+            frame = CreateFrame(server.EntMan, source, 1);
+            frameNet = server.EntMan.GetNetEntity(frame);
+            viewer = server.EntMan.SpawnAttachedTo(null, source, RigidTransform3.Identity);
+            var session = server.PlayerMan.Sessions.First();
+            server.PlayerMan.SetAttachedEntity(session, viewer);
+            server.PlayerMan.JoinGame(session);
+        });
+        await RunTicksSync(server, client, 40);
+        var observed = false;
+        await client.WaitAssertion(() =>
+        {
+            var streaming = client.System<ClientStreaming>();
+            var localFrame = client.EntMan.GetEntity(frameNet);
+            Assert.That(streaming.TryGetSnapshot(localFrame, out _), Is.True);
+            client.System<SharedTransformSystem>().OnGlobalMoveEvent += (ref MoveEvent ev) =>
+            {
+                if (ev.Sender != localFrame || !ev.ParentChanged) return;
+                observed = true;
+                Assert.That(streaming.TryGetSnapshot(localFrame, out _), Is.False,
+                    "The old world cache must be invalidated during the parent update, even with the same geometry stamp.");
+                if (ev.Component.MapUid is { } world)
+                    Assert.That(streaming.IsReady(world, new Box3(new Vector3(-1), new Vector3(1))), Is.False);
+            };
+        });
+        await server.WaitPost(() =>
+        {
+            var destination = server.System<SharedSpatialSystem>().CreateWorld();
+            var physics = server.System<SharedSpatialPhysicsSystem>();
+            physics.EnablePhysics(destination);
+            destinationNet = server.EntMan.GetNetEntity(destination);
+            physics.TransferGraph(new[] { frame, viewer }, destination, RigidTransform3.Identity);
+        });
+        await RunTicksSync(server, client, 40);
+        await client.WaitAssertion(() =>
+        {
+            Assert.That(observed, Is.True);
+            var streaming = client.System<ClientStreaming>();
+            Assert.That(streaming.TryGetSnapshot(client.EntMan.GetEntity(frameNet), out var snapshot), Is.True);
+            Assert.That(snapshot!.Revision, Is.Zero);
+            Assert.That(streaming.IsReady(client.EntMan.GetEntity(destinationNet), new Box3(new Vector3(-1), new Vector3(1))), Is.True);
         });
     }
 

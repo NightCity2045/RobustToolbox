@@ -20,6 +20,7 @@ public sealed partial class SpatialGeometryStreamingSystem : EntitySystem
 {
     [Dependency] private IClientNetManager _net = default!;
     [Dependency] private IClientGameTiming _timing = default!;
+    [Dependency] private SharedTransformSystem _transforms = default!;
     private readonly SpatialGeometryReplica _replica = new();
     private TimeSpan _pendingSince;
     private TimeSpan _lastRequest = TimeSpan.MinValue;
@@ -32,6 +33,7 @@ public sealed partial class SpatialGeometryStreamingSystem : EntitySystem
         UpdatesOutsidePrediction = true;
         _net.Disconnect += OnDisconnect;
         SubscribeLocalEvent<SpatialFrameComponent, SpatialGeometryStampChanged>(OnStampChanged);
+        _transforms.OnGlobalMoveEvent += OnMove;
         EntityManager.EntityDeleted += OnDeleted;
         EntityManager.AfterEntityFlush += Clear;
     }
@@ -39,6 +41,7 @@ public sealed partial class SpatialGeometryStreamingSystem : EntitySystem
     public override void Shutdown()
     {
         _net.Disconnect -= OnDisconnect;
+        _transforms.OnGlobalMoveEvent -= OnMove;
         EntityManager.EntityDeleted -= OnDeleted;
         EntityManager.AfterEntityFlush -= Clear;
         Clear();
@@ -55,6 +58,15 @@ public sealed partial class SpatialGeometryStreamingSystem : EntitySystem
     private void OnDeleted(Entity<MetaDataComponent> entity) => _replica.InvalidateKnown(entity.Comp.NetEntity, _timing.LastRealTick);
     private void OnStampChanged(EntityUid uid, SpatialFrameComponent component, ref SpatialGeometryStampChanged ev)
         => _replica.Invalidate(GetNetEntity(uid), _timing.LastRealTick);
+
+    private void OnMove(ref MoveEvent ev)
+    {
+        if (!ev.ParentChanged || TryComp<TransformComponent>(ev.OldPosition.EntityId, out var previous)
+            && previous.MapUid == ev.Component.MapUid) return;
+        // A world transfer can retain the exact same geometry revision. Cached
+        // geometry from the old world must stop certifying collision immediately.
+        _replica.InvalidateUnresolved(Resolve, _timing.LastRealTick);
+    }
 
     internal void OnManifest(MsgSpatialGeometryManifest message)
     {

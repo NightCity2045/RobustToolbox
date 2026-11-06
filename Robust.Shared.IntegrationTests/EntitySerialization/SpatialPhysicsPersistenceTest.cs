@@ -231,6 +231,32 @@ public sealed class SpatialPhysicsPersistenceTest : RobustIntegrationTest
             physics.Update(1);
             Assert.That(client.System<SharedTransformSystem>().GetWorldPose(localBody), Is.EqualTo(before));
         });
+        NetEntity destinationNet = default;
+        await server.WaitPost(() =>
+        {
+            var destination = server.System<SharedSpatialSystem>().CreateWorld();
+            var physics = server.System<SharedSpatialPhysicsSystem>();
+            physics.EnablePhysics(destination, settings);
+            physics.TransferGraph(new[] { body, server.EntMan.GetEntity(secondBodyNet) }, destination,
+                new RigidTransform3(Vector3.UnitZ * 10, Quaternion.Identity));
+            destinationNet = server.EntMan.GetNetEntity(destination);
+            server.EntMan.DeleteEntity(world);
+            world = destination;
+        });
+        await RunTicksSync(server, client, 20);
+        await client.WaitAssertion(() =>
+        {
+            var entities = client.EntMan;
+            var destination = entities.GetEntity(destinationNet);
+            foreach (var net in new[] { bodyNet, secondBodyNet, partNet, constraintNet })
+                Assert.That(entities.GetComponent<TransformComponent>(entities.GetEntity(net)).MapUid, Is.EqualTo(destination));
+            Assert.That(client.System<SharedTransformSystem>().GetWorldPose(entities.GetEntity(bodyNet)).Position.Z,
+                Is.EqualTo(13).Within(1e-4));
+            Assert.That(entities.GetComponent<TransformComponent>(entities.GetEntity(partNet)).ParentUid, Is.EqualTo(entities.GetEntity(bodyNet)));
+            var d = entities.GetComponent<SpatialConstraintComponent>(entities.GetEntity(constraintNet)).Definition;
+            Assert.That(d.BodyA, Is.EqualTo(entities.GetEntity(bodyNet)));
+            Assert.That(d.BodyB, Is.EqualTo(entities.GetEntity(secondBodyNet)));
+        });
         await server.WaitPost(() => server.EntMan.DeleteEntity(part));
         await RunTicksSync(server, client, 20);
         await client.WaitAssertion(() =>

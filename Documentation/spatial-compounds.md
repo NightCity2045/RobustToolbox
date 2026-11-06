@@ -59,9 +59,10 @@ boundary. Two endpoints in the same physical root need no additional connection 
 are rejected during connection configuration. Reconfiguration rejects a change that
 would merge a live connection's roots or remove its required dynamic participant.
 Deleting a named part removes the corresponding constraint component through the
-existing lifecycle. A link entity outside a transferred hierarchy remains subject
-to the existing same-world/dormancy checks; this is not an automatic connected-graph
-transfer or a content docking/destruction decision.
+existing lifecycle. For a multi-root world change, `TransferGraph` validates and
+moves the complete selected physical graph, including separately parented links;
+see [spatial-transfer.md](spatial-transfer.md). Ordinary individual reparenting
+retains same-world/dormancy checks and does not choose a docking/destruction policy.
 
 History captures anchored geometry frames even when the root uses explicit colliders.
 Historical anchored body state derives point velocity from the captured root and
@@ -76,5 +77,5 @@ geometry/state. Map save/load and cloned graphs rebuild combined mass, remap par
 collider sources and seat endpoints, and restore the connection. A connected client
 receives anchored ownership/local pose and part deletion without a second solver.
 Full moving-structure acceptance still needs content controllers,
-closed-graph transfer coordination, multi-client moving-vehicle scenarios and performance
+multi-client moving-vehicle scenarios and performance
 qualification; these tests alone do not close E08/G8.

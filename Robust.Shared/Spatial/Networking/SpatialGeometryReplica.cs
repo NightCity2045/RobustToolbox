@@ -75,7 +75,7 @@ internal sealed class SpatialGeometryReplica
     private bool _needsBaseline;
 
     internal sealed record CachedFrame(SpatialGeometryFrameManifest Description, byte[] Bytes,
-        SpatialGeometrySnapshot Snapshot);
+        SpatialGeometrySnapshot Snapshot, NetEntity[] References);
     private sealed class Incoming(SpatialGeometryFrameManifest description, byte[] bytes, bool cached)
     {
         public readonly SpatialGeometryFrameManifest Description = description;
@@ -201,7 +201,7 @@ internal sealed class SpatialGeometryReplica
                 throw new InvalidDataException("Geometry payload differs from its frame manifest.");
             solids = checked(solids + snapshot.SolidParts.Count);
             if (solids > MaximumSolids) throw new InvalidDataException("Geometry replica solid budget exceeded.");
-            next.Add(description.Frame, new CachedFrame(description, incoming.Bytes, snapshot));
+            next.Add(description.Frame, new CachedFrame(description, incoming.Bytes, snapshot, incoming.References!));
         }
         // Coverage may refer to an empty spatial world with no geometry frames.
         foreach (var view in pending.Manifest.Coverage)
@@ -224,6 +224,14 @@ internal sealed class SpatialGeometryReplica
     public void InvalidateKnown(NetEntity frame, GameTick tick)
     {
         if (_frames.ContainsKey(frame) || _pending?.Frames.ContainsKey(frame) == true) Invalidate(frame, tick);
+    }
+
+    public void InvalidateUnresolved(Func<NetEntity, NetEntity, EntityUid?> resolve, GameTick tick)
+    {
+        foreach (var (frame, cached) in _frames)
+            if (resolve(cached.Description.World, frame) != cached.Snapshot.OwnerFrame
+                || cached.References.Any(reference => resolve(cached.Description.World, reference) == null))
+                Invalidate(frame, tick);
     }
 
     public bool TryGetSnapshot(NetEntity frame, out SpatialGeometrySnapshot? snapshot)

@@ -120,7 +120,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
             return;
         if (!float.IsFinite(frameTime))
             throw new ArgumentOutOfRangeException(nameof(frameTime));
-        if (_updating)
+        if (_updating || _transferring)
             throw new InvalidOperationException("The spatial physics boundary cannot be reentered.");
         _updating = true;
         try { UpdateSpatial(frameTime); }

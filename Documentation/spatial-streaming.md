@@ -47,6 +47,9 @@ collision data. It must never be interpreted as an empty scene. Pending manifest
 and newly received geometry stamps invalidate coverage; an older in-flight
 manifest cannot clear a newer frame invalidation. A newer manifest may explicitly
 certify that a removed/out-of-range frame no longer contributes to coverage.
+Reparenting across worlds immediately invalidates cached frames whose owners or
+semantic references no longer resolve in their recorded world, even with unchanged
+geometry stamps. A new-world manifest must establish coverage again.
 These APIs do not themselves implement the prediction barrier or client physics.
 
 Network registration belongs to the persistent entity manager. Message callbacks
@@ -64,5 +67,5 @@ with both ordinary PVS and the explicit server PVS-off mode.
 
 Remaining E07 work includes chunk scheduling for oversized selections, coherent
 collision consumption during state/interest churn, local prediction/reconciliation,
-pose/geometry history, replay capture and loss/jitter qualification. Passing these
+prediction integration with the available pose/geometry history, replay capture and loss/jitter qualification. Passing these
 transport tests does not close G7.

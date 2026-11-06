@@ -171,6 +171,29 @@ public sealed class SpatialGeometryReplicaTest
     }
 
     [Test]
+    public void SameRevisionInAnotherWorldInvalidatesCachedCollisionBeforeNextManifest()
+    {
+        var replica = new SpatialGeometryReplica();
+        var a = Payload(1, 0);
+        replica.Begin(Manifest(1, 0, 1, a.Description));
+        Send(replica, 1, a);
+        replica.TryApply(new GameTick(1), Resolve, _ => a.Description.Stamp);
+        var destination = new NetEntity(98);
+        EntityUid? Moved(NetEntity world, NetEntity uid) => world == destination ? new EntityUid(uid.Id + 100) : null;
+        replica.InvalidateUnresolved(Moved, new GameTick(2));
+        Assert.That(replica.TryGetSnapshot(a.Description.Frame, out _), Is.False);
+        Assert.That(replica.IsCovered(World, View), Is.False);
+        Assert.That(replica.IsCovered(destination, View), Is.False);
+        var description = a.Description with { World = destination };
+        replica.Begin(new SpatialGeometryManifest(2, 1, new GameTick(2), new[] { description },
+            new[] { new SpatialGeometryCoverage(destination, View) }));
+        Send(replica, 2, (description, a.Bytes));
+        Assert.That(replica.TryApply(new GameTick(2), Moved, _ => a.Description.Stamp), Is.EqualTo(SpatialGeometryApplyResult.Applied));
+        Assert.That(replica.IsCovered(destination, View), Is.True);
+        Assert.That(replica.IsCovered(World, View), Is.False);
+    }
+
+    [Test]
     public void ManifestBudgetsAndEmptyWorldCoverageAreExplicit()
     {
         var a = Payload(1, 0);

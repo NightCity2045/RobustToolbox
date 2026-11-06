@@ -113,6 +113,33 @@ public abstract partial class MetaDataSystem : EntitySystem
         Dirty(uid, metadata, metadata);
     }
 
+    /// <summary>Commit a spatial transfer's pause states before any observer runs.</summary>
+    internal void CommitSpatialPauseStates(System.Collections.Generic.IReadOnlyList<Entity<MetaDataComponent>> entities,
+        bool paused, System.Action beforeNotifications)
+    {
+        var changed = new System.Collections.Generic.List<(Entity<MetaDataComponent> Entity, TimeSpan Duration)>();
+        foreach (var entity in entities)
+        {
+            if (entity.Comp.EntityPaused == paused) continue;
+            var duration = entity.Comp.PauseTime is { } since ? _timing.CurTime - since : TimeSpan.Zero;
+            entity.Comp.PauseTime = paused ? _timing.CurTime : null;
+            Dirty(entity.Owner, entity.Comp, entity.Comp);
+            changed.Add((entity, duration));
+        }
+        beforeNotifications();
+        foreach (var (entity, duration) in changed)
+        {
+            if (TerminatingOrDeleted(entity)) continue;
+            if (paused)
+                RaiseLocalEvent(entity.Owner, ref _pausedEvent);
+            else
+            {
+                var ev = new EntityUnpausedEvent(duration);
+                RaiseLocalEvent(entity.Owner, ref ev);
+            }
+        }
+    }
+
     /// <summary>
     /// Gets how long this entity has been paused.
     /// </summary>
