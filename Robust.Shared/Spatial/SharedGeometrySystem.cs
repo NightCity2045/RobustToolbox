@@ -6,12 +6,13 @@ using Robust.Shared.GameObjects;
 namespace Robust.Shared.Spatial;
 
 /// <summary>Owns validated canonical frame geometry and detached revisioned captures.</summary>
-public sealed class SharedGeometrySystem : EntitySystem
+public sealed partial class SharedGeometrySystem : EntitySystem
 {
     public override void Initialize()
     {
         base.Initialize();
         SubscribeLocalEvent<SpatialGeometryComponent, ComponentInit>(OnInit);
+        InitializeTransactions();
     }
 
     public void ConfigureInitialGeometry(Entity<SpatialGeometryComponent> frame,
@@ -40,7 +41,7 @@ public sealed class SharedGeometrySystem : EntitySystem
         if (geometry._schema != SpatialGeometryComponent.CurrentSchema)
             throw new InvalidOperationException($"Unsupported spatial geometry schema {geometry._schema}.");
         return new SpatialGeometrySnapshot(frame, geometry._revision, Comp<SpatialFrameComponent>(frame)._layers,
-            geometry._boundaries, geometry._slabs, geometry._tileChunks);
+            geometry._boundaries, geometry._slabs, geometry._tileChunks, geometry.CaptureIdentity);
     }
 
     /// <summary>Resolve a persistent semantic surface independently of any mesh or physics shape index.</summary>

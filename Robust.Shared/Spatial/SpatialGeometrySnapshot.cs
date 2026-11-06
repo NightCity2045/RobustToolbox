@@ -13,6 +13,7 @@ namespace Robust.Shared.Spatial;
 /// </summary>
 public sealed class SpatialGeometrySnapshot
 {
+    internal object? CaptureIdentity { get; }
     public EntityUid OwnerFrame { get; }
     public ulong Revision { get; }
     public IReadOnlyDictionary<LayerId, LayerDefinition> Layers { get; }
@@ -25,7 +26,7 @@ public sealed class SpatialGeometrySnapshot
     internal SpatialGeometrySnapshot(EntityUid frame, ulong revision,
         IReadOnlyDictionary<LayerId, LayerDefinition> layers,
         IEnumerable<BoundarySegment> boundaries, IEnumerable<SlabSurface> slabs,
-        IEnumerable<SpatialTileChunk> tileChunks)
+        IEnumerable<SpatialTileChunk> tileChunks, object? captureIdentity = null)
     {
         if (!frame.IsValid())
             throw new ArgumentException("A geometry snapshot requires an owner frame.", nameof(frame));
@@ -34,6 +35,7 @@ public sealed class SpatialGeometrySnapshot
         ArgumentNullException.ThrowIfNull(slabs);
         ArgumentNullException.ThrowIfNull(tileChunks);
         OwnerFrame = frame;
+        CaptureIdentity = captureIdentity;
         Revision = revision;
         var layerCopy = new Dictionary<LayerId, LayerDefinition>();
         foreach (var (id, definition) in layers)

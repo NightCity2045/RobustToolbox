@@ -6,6 +6,9 @@ using Robust.Shared.Serialization.Manager.Attributes;
 
 namespace Robust.Shared.Spatial;
 
+[ByRefEvent]
+internal readonly struct SpatialWorldStopping;
+
 /// <summary>
 /// Spatial metadata on the existing map entity. Owns no entity poses or physics
 /// handles. Presence of this metadata is not a camera mode or a second map.

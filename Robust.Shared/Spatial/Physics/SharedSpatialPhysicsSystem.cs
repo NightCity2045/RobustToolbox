@@ -27,6 +27,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
     private readonly Dictionary<EntityUid, BepuSpatialPhysicsBackend> _worlds = new();
     private readonly Dictionary<EntityUid, Binding> _bindings = new();
     private bool _committing;
+    private bool _updating;
 
     private sealed record Binding(EntityUid Entity, EntityUid World, SpatialBackendBodyId Body,
         bool Geometry, ulong GeometryRevision, bool Paused, ulong DefinitionRevision);
@@ -47,7 +48,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
         SubscribeLocalEvent<SpatialBodyComponent, EntityPausedEvent>(OnBodyPaused);
         SubscribeLocalEvent<SpatialBodyComponent, EntityUnpausedEvent>(OnBodyUnpaused);
         SubscribeLocalEvent<SpatialGeometryComponent, ComponentStartup>(OnGeometryStartup);
-        SubscribeLocalEvent<SpatialGeometryComponent, ComponentShutdown>(OnGeometryShutdown);
+        SubscribeLocalEvent<SpatialGeometryComponent, SpatialGeometryStopping>(OnGeometryShutdown);
         SubscribeLocalEvent<EntGotInsertedIntoContainerMessage>(OnContainerInserted);
         SubscribeLocalEvent<EntGotRemovedFromContainerMessage>(OnContainerRemoved);
         _transforms.OnGlobalMoveEvent += OnMove;
@@ -115,6 +116,18 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
     {
         if (!_net.IsServer || frameTime <= 0)
             return;
+        if (!float.IsFinite(frameTime))
+            throw new ArgumentOutOfRangeException(nameof(frameTime));
+        if (_updating)
+            throw new InvalidOperationException("The spatial physics boundary cannot be reentered.");
+        _updating = true;
+        try { UpdateSpatial(frameTime); }
+        finally { _updating = false; }
+    }
+
+    private void UpdateSpatial(float frameTime)
+    {
+        _geometry.CommitPending();
         SyncConstraints();
         PrepareMotors(frameTime);
         foreach (var (world, backend) in _worlds)
@@ -202,7 +215,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
             RefreshBinding(uid);
     }
 
-    private void OnGeometryShutdown(EntityUid uid, SpatialGeometryComponent component, ComponentShutdown args)
+    private void OnGeometryShutdown(EntityUid uid, SpatialGeometryComponent component, ref SpatialGeometryStopping args)
     {
         RemoveConstraintsReferencing(uid);
         if (_bindings.TryGetValue(uid, out var binding) && binding.Geometry)
@@ -351,13 +364,13 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
     }
 
     private SpatialBackendBodyDefinition? BuildBackendDefinition(EntityUid uid, SpatialBodyDefinition definition,
-        ulong definitionRevision, out ulong revision)
+        ulong definitionRevision, out ulong revision, SpatialGeometrySnapshot? geometry = null)
     {
         var parts = new List<SpatialBackendPart>();
         revision = 0;
         if (definition.UseGeometry)
         {
-            var snapshot = _geometry.CaptureSnapshot(uid);
+            var snapshot = geometry ?? _geometry.CaptureSnapshot(uid);
             revision = snapshot.Revision;
             var volume = snapshot.SolidParts.Sum(s => s.Bounds.Volume);
             foreach (var solid in snapshot.SolidParts)

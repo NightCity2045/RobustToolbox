@@ -201,7 +201,11 @@ public sealed partial class SharedSpatialSystem : EntitySystem
     }
 
     private void OnWorldShutdown(EntityUid uid, SpatialWorldComponent component, ComponentShutdown args)
-        => UnregisterWorld(uid, component._persistentId);
+    {
+        var ev = new SpatialWorldStopping();
+        RaiseLocalEvent(uid, ref ev);
+        UnregisterWorld(uid, component._persistentId);
+    }
 
     private void OnWorldGetState(EntityUid uid, SpatialWorldComponent component, ref ComponentGetState args)
         => args.State = new SpatialWorldComponentState(component._persistentId, component._definitionSchema);
