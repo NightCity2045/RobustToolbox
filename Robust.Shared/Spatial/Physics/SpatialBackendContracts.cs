@@ -18,7 +18,8 @@ internal sealed record SpatialSphere(float Radius) : SpatialConvexShape;
 internal sealed record SpatialCapsule(float Radius, float Length) : SpatialConvexShape;
 
 internal readonly record struct SpatialBackendPart(SpatialConvexShape Shape, RigidTransform3 LocalPose,
-    EntityUid? Entity = null, SpatialSurfaceReference? Surface = null, ulong Revision = 0, float MassWeight = 1);
+    EntityUid? Entity = null, SpatialSurfaceReference? Surface = null, ulong Revision = 0, float MassWeight = 1,
+    string MaterialProfile = "");
 
 internal readonly record struct SpatialBackendMaterial(float Friction, float RecoveryVelocity, float SpringFrequency, float Damping)
 {
@@ -92,6 +93,10 @@ internal readonly record struct SpatialBackendState(RigidTransform3 Pose, Vector
 internal readonly record struct SpatialBackendHit(SpatialBackendBodyId Body, SpatialBackendPart Source,
     Vector3 Point, Vector3 Normal, float Distance);
 
+/// <summary>Fraction of the requested motion; an initial overlap has no unique contact point/normal.</summary>
+internal readonly record struct SpatialBackendCastHit(SpatialBackendBodyId Body, SpatialBackendPart Source,
+    float Fraction, Vector3? Point, Vector3? Normal);
+
 internal interface ISpatialPhysicsBackend : IDisposable
 {
     SpatialBackendBodyId AddBody(SpatialBackendBodyDefinition definition, SpatialBackendState state);
@@ -100,5 +105,9 @@ internal interface ISpatialPhysicsBackend : IDisposable
     void SetState(SpatialBackendBodyId id, SpatialBackendState state);
     void Step(float fixedDelta);
     SpatialBackendHit? RayCast(Vector3 origin, Vector3 unitDirection, float distance, uint mask,
-        SpatialBackendBodyId? ignoredBody = null);
+        SpatialBackendBodyId? ignoredBody = null, Func<SpatialBackendPart, bool>? filter = null);
+    IReadOnlyList<SpatialBackendCastHit> ShapeCast(SpatialConvexShape shape, RigidTransform3 pose,
+        Vector3 translation, Vector3 angularDisplacement, uint mask, SpatialBackendBodyId? ignoredBody = null);
+    IReadOnlyList<SpatialBackendCastHit> Overlap(SpatialConvexShape shape, RigidTransform3 pose,
+        uint mask, SpatialBackendBodyId? ignoredBody = null);
 }

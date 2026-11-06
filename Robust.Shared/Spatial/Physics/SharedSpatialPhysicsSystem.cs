@@ -317,7 +317,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
             foreach (var solid in snapshot.SolidParts)
                 parts.Add(new SpatialBackendPart(new SpatialBox(solid.Bounds.Size),
                     new Maths.RigidTransform3(solid.Bounds.Center, Quaternion.Identity), solid.Entity ?? uid,
-                    solid.Surface, solid.Revision, (float) (solid.Bounds.Volume / volume)));
+                    solid.Surface, solid.Revision, (float) (solid.Bounds.Volume / volume), solid.MaterialProfile));
         }
         else
         {
@@ -362,6 +362,12 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
     }
 
     internal ISpatialPhysicsBackend GetBackend(EntityUid world) => _worlds[world];
+    internal bool TryGetBackend(EntityUid world, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out ISpatialPhysicsBackend? backend)
+    {
+        var found = _worlds.TryGetValue(world, out var value);
+        backend = value;
+        return found;
+    }
     internal int GetBodyCount(EntityUid world) => _worlds[world].BodyCount;
 
     private void RequireServer()

@@ -5,8 +5,8 @@ implementation owns its simulation, pooled buffers, compound indices and body
 handles. It accepts neutral body definitions and returns neutral body states and
 source-qualified ray hits. `SharedSpatialPhysicsSystem` connects this backend to
 explicit spatial world profiles and ECS bodies. The ordinary content maps and
-prototypes have not been migrated or enabled by this engine change. World/frame-
-aware query policy, motor, constraints, contact events, client collision streaming
+prototypes have not been migrated or enabled by this engine change. Motor,
+constraints, contact events, client collision streaming
 and prediction remain required integration work.
 
 Static, dynamic and kinematic bodies use compound box, sphere and Z-axis capsule
@@ -100,3 +100,41 @@ Source references (Apache-2.0):
 Performance and the complete E03/G3 acceptance remain unqualified. Conservative
 bounds can increase candidate counts; they are required for correctness and must
 be measured together with the final ECS/controller integration.
+
+## World/frame-aware queries
+
+`SpatialQuerySystem` implements `ISpatialQueryService`: raycast, shape cast,
+overlap, free-volume checks and directional semantic-surface search. Each call
+requires a `SpatialQueryContext` with world, input frame, purpose and mask.
+Input coordinates/displacements are frame-local; returned points/normals are
+world-space. Rotation uses a world-axis angular displacement after converting
+from the input frame, over the same normalized [0,1] interval as translation.
+A rotating cast's distance measures center translation, while its fraction
+identifies progress of the complete translation/rotation.
+
+The caller can filter source entities/surfaces/material profiles according to
+its purpose. The engine supplies mechanism, not gameplay permission or one
+shared permeability rule. Ray filtering happens during child traversal, so a
+rejected nearer candidate does not hide an eligible farther one. IgnoredEntity
+excludes matching source entities. Filters must be read-only; recursive queries
+are rejected. All sources retain semantic surface revision and material profile.
+
+Queries traverse the world's broadphase and each compound's child tree, then use
+BEPU convex narrowphase for the actual shape pair. Overlapping bounding boxes
+alone do not produce an overlap result. Box, sphere and Z-capsule casts support
+translation and rotation, including pure rotation outside the initial bounds.
+A sweep against the current scene does not predict other bodies' future motion;
+backend continuous collision handles relative motion during physical simulation.
+
+An initial overlap has no unique sweep contact witness: Point/Normal are null,
+Fraction/Distance are zero, and InitialOverlap is true. Callers must explicitly
+handle this condition rather than treating the default vector as a surface normal.
+Overlap and IsVolumeFree conservatively include touching shapes.
+
+Optional expected frame revisions are checked before querying. Wrong-world,
+stale/missing geometry and unavailable collision scenes throw; they never report
+empty space. Client collision streaming/prediction remains pending, so a client
+without its collision baseline cannot use this service to authorize movement.
+Contained bodies remain excluded from the world's active collision scene; content
+uses its container access rules separately. Query results do not grant access to
+items inside a container.

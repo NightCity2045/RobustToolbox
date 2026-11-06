@@ -17,7 +17,7 @@ namespace Robust.Shared.Spatial.Physics;
 /// solver state; ECS must commit results to the existing canonical Transform.
 /// Body handles, compound shape indices and pooled buffers remain private.
 /// </summary>
-internal sealed class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
+internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
 {
     private readonly BufferPool _pool = new();
     private readonly Simulation _simulation;
@@ -249,13 +249,13 @@ internal sealed class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
     }
 
     public SpatialBackendHit? RayCast(Vector3 origin, Vector3 unitDirection, float distance, uint mask,
-        SpatialBackendBodyId? ignoredBody = null)
+        SpatialBackendBodyId? ignoredBody = null, Func<SpatialBackendPart, bool>? filter = null)
     {
         ThrowIfDisposed();
         if (!SpatialBackendBodyDefinition.Finite(origin) || !SpatialBackendBodyDefinition.Finite(unitDirection)
             || MathF.Abs(unitDirection.LengthSquared() - 1) > 1e-4f || !float.IsFinite(distance) || distance <= 0)
             throw new ArgumentException("A spatial ray requires finite origin, unit direction and positive distance.");
-        var handler = new RayHandler(this, mask, ignoredBody);
+        var handler = new RayHandler(this, mask, ignoredBody, filter);
         _simulation.RayCast(origin, unitDirection, distance, ref handler);
         return handler.Hit;
     }
@@ -312,7 +312,8 @@ internal sealed class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
             throw new ArgumentException("Shape mass or inertia exceeds the finite solver range.");
     }
 
-    private struct RayHandler(BepuSpatialPhysicsBackend owner, uint mask, SpatialBackendBodyId? ignored) : IRayHitHandler
+    private struct RayHandler(BepuSpatialPhysicsBackend owner, uint mask, SpatialBackendBodyId? ignored,
+        Func<SpatialBackendPart, bool>? filter) : IRayHitHandler
     {
         public SpatialBackendHit? Hit;
         public bool AllowTest(CollidableReference collidable)
@@ -320,7 +321,8 @@ internal sealed class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
             var entry = owner.GetEntry(collidable);
             return entry.Id != ignored && (entry.Definition.CollisionLayer & mask) != 0;
         }
-        public bool AllowTest(CollidableReference collidable, int childIndex) => true;
+        public bool AllowTest(CollidableReference collidable, int childIndex)
+            => filter?.Invoke(owner.GetEntry(collidable).Definition.Parts[childIndex]) ?? true;
         public void OnRayHit(in RayData ray, ref float maximumT, float t, in Vector3 normal,
             CollidableReference collidable, int childIndex)
         {
