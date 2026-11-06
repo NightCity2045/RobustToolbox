@@ -99,6 +99,14 @@ namespace Robust.Shared.GameObjects
         EntityUid CreateEntityUninitialized(string? prototypeName, EntityCoordinates coordinates, ComponentRegistry? overrides = null, Angle rotation = default);
 
         /// <summary>
+        /// Creates an entity with its complete pose in an explicitly selected parent frame before initialization.
+        /// Invalid poses or parent frames are rejected before allocation. Prototype anchoring is retained;
+        /// a rotated pose on a NoLocalRotation prototype is rejected and the new entity is cleaned up.
+        /// </summary>
+        EntityUid CreateEntityUninitialized(string? prototypeName, EntityUid parent, RigidTransform3 localPose,
+            ComponentRegistry? overrides = null);
+
+        /// <summary>
         /// Creates an uninitialized entity and puts it on the grid or map at the MapCoordinates provided.
         /// </summary>
         /// <param name="prototypeName">Name of the <see cref="EntityPrototype"/> to spawn.</param>

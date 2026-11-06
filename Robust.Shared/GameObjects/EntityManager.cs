@@ -341,6 +341,30 @@ namespace Robust.Shared.GameObjects
         }
 
         /// <inheritdoc />
+        public virtual EntityUid CreateEntityUninitialized(string? prototypeName, EntityUid parent,
+            RigidTransform3 localPose, ComponentRegistry? overrides = null)
+        {
+            if (!localPose.IsValid)
+                throw new ArgumentOutOfRangeException(nameof(localPose));
+            if (!TransformQuery.TryGetComponent(parent, out _) ||
+                !MetaQuery.TryGetComponent(parent, out var parentMeta) ||
+                parentMeta.EntityLifeStage >= EntityLifeStage.Terminating)
+                throw new ArgumentException("A spatial spawn requires a live parent frame.", nameof(parent));
+
+            var uid = CreateEntity(prototypeName, out var meta, overrides);
+            try
+            {
+                _xforms.SetInitialPose((uid, TransformQuery.GetComponent(uid), meta), parent, localPose);
+                return uid;
+            }
+            catch
+            {
+                DeleteEntity(uid);
+                throw;
+            }
+        }
+
+        /// <inheritdoc />
         public virtual EntityUid CreateEntityUninitialized(string? prototypeName, EntityCoordinates coordinates, ComponentRegistry? overrides = null, Angle rotation = default)
         {
             // Reject invalid input before allocating an entity that the caller cannot clean up.

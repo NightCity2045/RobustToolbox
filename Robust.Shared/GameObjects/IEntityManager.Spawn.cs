@@ -44,6 +44,13 @@ public partial interface IEntityManager
     EntityUid SpawnAttachedTo(string? protoName, EntityCoordinates coordinates, ComponentRegistry? overrides = null, Angle rotation = default);
 
     /// <summary>
+    /// Spawns in an explicitly selected parent frame with the complete local pose already available to
+    /// component initialization and startup. Does not infer a layer or supporting surface from XY.
+    /// </summary>
+    EntityUid SpawnAttachedTo(string? protoName, EntityUid parent, RigidTransform3 localPose,
+        ComponentRegistry? overrides = null);
+
+    /// <summary>
     /// Resolves the given entity coordinates into world coordinates and spawns an entity at that location. The
     /// entity will either be parented to the map or a grid.
     /// </summary>

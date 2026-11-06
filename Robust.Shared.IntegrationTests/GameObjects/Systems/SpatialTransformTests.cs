@@ -248,4 +248,142 @@ public sealed class SpatialTransformTests
         SamePose(transforms.GetWorldPose(item), ownerPose);
         Assert.That(container.ContainedEntities, Is.Empty);
     }
+
+    [Test]
+    public void MovingFrameBetweenMapsTransfersDescendantsAndDeletionOwnership()
+    {
+        var sim = RobustServerSimulation.NewSimulation().InitializeInstance();
+        var entities = sim.Resolve<IEntityManager>();
+        var maps = entities.System<SharedMapSystem>();
+        var transforms = entities.System<SharedTransformSystem>();
+        var source = maps.CreateMap(out var sourceId);
+        var target = maps.CreateMap(out var targetId);
+        var frame = entities.Spawn(null, new MapCoordinates(Vector2.Zero, sourceId));
+        var child = entities.SpawnAttachedTo(null, new EntityCoordinates(frame, Vector2.One));
+        var nested = entities.SpawnAttachedTo(null, new EntityCoordinates(child, -Vector2.One));
+        transforms.SetLocalPose(frame, new RigidTransform3(new Vector3(-10, 20, 35),
+            Quaternion.CreateFromYawPitchRoll(0.7f, -0.2f, 1.1f)));
+        transforms.SetLocalPose(child, new RigidTransform3(new Vector3(2, -3, -4),
+            Quaternion.CreateFromYawPitchRoll(-0.5f, 0.8f, 0.3f)));
+        var before = new[] { transforms.GetWorldPose(frame), transforms.GetWorldPose(child), transforms.GetWorldPose(nested) };
+
+        transforms.SetParent(frame, target);
+        var descendants = new[] { frame, child, nested };
+        for (var i = 0; i < descendants.Length; i++)
+        {
+            var transform = entities.GetComponent<TransformComponent>(descendants[i]);
+            Assert.That(transform.MapUid, Is.EqualTo(target));
+            Assert.That(transform.MapID, Is.EqualTo(targetId));
+            SamePose(transforms.GetWorldPose(descendants[i]), before[i]);
+        }
+        Assert.That(entities.GetComponent<TransformComponent>(source).ChildCount, Is.Zero);
+        maps.DeleteMap(sourceId);
+        foreach (var uid in descendants)
+            Assert.That(entities.EntityExists(uid), Is.True);
+
+        maps.DeleteMap(targetId);
+        foreach (var uid in descendants)
+            Assert.That(entities.Deleted(uid), Is.True);
+        Assert.That(maps.MapExists(sourceId), Is.False);
+        Assert.That(maps.MapExists(targetId), Is.False);
+    }
+
+    [Test]
+    public void DetachClearsSpatialInterpolationAndParentOwnership()
+    {
+        var sim = RobustServerSimulation.NewSimulation().InitializeInstance();
+        var entities = sim.Resolve<IEntityManager>();
+        var map = sim.CreateMap().MapId;
+        var transforms = entities.System<SharedTransformSystem>();
+        var parent = entities.Spawn(null, new MapCoordinates(Vector2.Zero, map));
+        var child = entities.SpawnAttachedTo(null, new EntityCoordinates(parent, Vector2.One));
+        var transform = entities.GetComponent<TransformComponent>(child);
+        transforms.SetLocalPose(child, new RigidTransform3(new Vector3(3, 4, 5),
+            Quaternion.CreateFromYawPitchRoll(0.2f, -0.3f, 0.4f)));
+        transform.NextPosition = new Vector3(7, 8, 9);
+        transform.NextRotation = Quaternion.CreateFromAxisAngle(Vector3.UnitX, 0.7f);
+        transform.LerpParent = parent;
+
+        transforms.DetachEntity(child);
+        Assert.Multiple(() =>
+        {
+            Assert.That(transform.ParentUid, Is.EqualTo(EntityUid.Invalid));
+            Assert.That(transform.MapUid, Is.Null);
+            Assert.That(transform.LocalPose, Is.EqualTo(RigidTransform3.Identity));
+            Assert.That(transform.NextPosition, Is.Null);
+            Assert.That(transform.NextRotation, Is.Null);
+            Assert.That(transform.LerpParent, Is.EqualTo(EntityUid.Invalid));
+            Assert.That(entities.GetComponent<TransformComponent>(parent).ChildCount, Is.Zero);
+        });
+        entities.DeleteEntity(parent);
+        Assert.That(entities.EntityExists(child), Is.True);
+        entities.DeleteEntity(child);
+    }
+
+    [Test]
+    public void SpatialSpawnHasCompletePoseBeforeInitializationCompletes()
+    {
+        var sim = RobustServerSimulation.NewSimulation().InitializeInstance();
+        var entities = sim.Resolve<IEntityManager>();
+        var maps = entities.System<SharedMapSystem>();
+        var transforms = entities.System<SharedTransformSystem>();
+        maps.CreateMap(out var mapId);
+        var frame = entities.Spawn(null, new MapCoordinates(Vector2.Zero, mapId));
+        var framePose = new RigidTransform3(new Vector3(20, -10, 6),
+            Quaternion.CreateFromYawPitchRoll(0.5f, -0.2f, 0.3f));
+        var local = new RigidTransform3(new Vector3(-3, 4, 7),
+            Quaternion.CreateFromYawPitchRoll(-0.1f, 0.7f, -0.4f));
+        transforms.SetLocalPose(frame, framePose);
+        var observed = false;
+        void OnInitialized(Entity<MetaDataComponent> entity)
+        {
+            var transform = entities.GetComponent<TransformComponent>(entity);
+            Assert.That(transform.ParentUid, Is.EqualTo(frame));
+            SamePose(transform.LocalPose, local);
+            SamePose(transforms.GetWorldPose(entity), framePose.Compose(local));
+            observed = true;
+        }
+        entities.EntityInitialized += OnInitialized;
+        EntityUid child;
+        try
+        {
+            child = entities.SpawnAttachedTo(null, frame, local);
+        }
+        finally
+        {
+            entities.EntityInitialized -= OnInitialized;
+        }
+        Assert.That(observed, Is.True);
+        SamePose(transforms.GetWorldPose(child), framePose.Compose(local));
+    }
+
+    [Test]
+    public void InvalidSpatialSpawnLeavesNoAllocatedEntityOrParentLink()
+    {
+        var sim = RobustServerSimulation.NewSimulation()
+            .RegisterPrototypes(prototypes => prototypes.LoadString("""
+                - type: entity
+                  id: SpatialNoLocalRotation
+                  components:
+                  - type: Transform
+                    noRot: true
+                """))
+            .InitializeInstance();
+        var entities = sim.Resolve<IEntityManager>();
+        var maps = entities.System<SharedMapSystem>();
+        var map = maps.CreateMap();
+        var removed = entities.SpawnAttachedTo(null, map, RigidTransform3.Identity);
+        entities.DeleteEntity(removed);
+        var count = entities.EntityCount;
+        Assert.Throws<ArgumentOutOfRangeException>(() => entities.CreateEntityUninitialized(null, map, default(RigidTransform3)));
+        Assert.Throws<ArgumentException>(() => entities.CreateEntityUninitialized(null, EntityUid.Invalid, RigidTransform3.Identity));
+        Assert.Throws<ArgumentException>(() => entities.SpawnAttachedTo(null, removed, RigidTransform3.Identity));
+        var rotated = new RigidTransform3(Vector3.UnitZ, Quaternion.CreateFromAxisAngle(Vector3.UnitX, 0.5f));
+        Assert.Throws<InvalidOperationException>(() => entities.SpawnAttachedTo("SpatialNoLocalRotation", map, rotated));
+        Assert.That(entities.EntityCount, Is.EqualTo(count));
+        Assert.That(entities.GetComponent<TransformComponent>(map).ChildCount, Is.Zero);
+        var valid = entities.SpawnAttachedTo("SpatialNoLocalRotation", map,
+            new RigidTransform3(new Vector3(1, 2, 3), Quaternion.Identity));
+        Assert.That(entities.GetComponent<TransformComponent>(valid).LocalPose.Position, Is.EqualTo(new Vector3(1, 2, 3)));
+    }
 }

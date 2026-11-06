@@ -126,6 +126,18 @@ public abstract partial class SharedTransformSystem
         SetCoordinates3((uid, transform, MetaData(uid)), parent, pose.Position, pose.Rotation);
     }
 
+    /// <summary>Apply a spawn pose before component initialization, retaining prototype anchoring.</summary>
+    internal void SetInitialPose(Entity<TransformComponent, MetaDataComponent> entity, EntityUid parent,
+        RigidTransform3 pose)
+    {
+        ValidatePose(pose);
+        if (entity.Comp2.EntityLifeStage >= EntityLifeStage.Initializing)
+            throw new InvalidOperationException("An initial pose must be assigned before entity initialization.");
+        if (entity.Comp1.NoLocalRotation && pose.Rotation != Quaternion.Identity)
+            throw new InvalidOperationException("An entity with NoLocalRotation cannot spawn with a rotated local pose.");
+        SetCoordinates3(entity, parent, pose.Position, pose.Rotation, unanchor: false);
+    }
+
     protected static void ValidatePose(RigidTransform3 pose)
     {
         if (!pose.IsValid)

@@ -71,6 +71,15 @@ angles that violated container invariants during equipment creation. Six regress
 cases cover exact yaw reset and container insertion/removal; all 1232 Shared
 integration tests pass. The full content pair must be requalified after this fix.
 
+`IEntityManager.SpawnAttachedTo(prototype, parent, localPose)` and its
+`CreateEntityUninitialized` counterpart establish the full pose before component
+initialization. The caller selects the parent frame explicitly. Invalid poses and
+missing or terminating frames fail before allocation. Prototype anchoring is
+retained; an incompatible `NoLocalRotation` pose fails with cleanup rather than
+silently discarding orientation. Four further tests cover initialization, failed
+spawn cleanup, transferring a nested XYZ hierarchy between maps, deletion ownership,
+and clearing interpolation on detach. All 1236 Shared integration tests pass.
+
 E01/G1 is not complete. Spatial-world profiles, stable world/layer/surface IDs,
 diagnostics for implicit planar calls, and full movement ownership/lifecycle
 integration remain. The existing physics, query, renderer, and PVS implementations

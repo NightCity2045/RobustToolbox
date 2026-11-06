@@ -107,6 +107,14 @@ public partial class EntityManager
         return entity;
     }
 
+    public virtual EntityUid SpawnAttachedTo(string? protoName, EntityUid parent, RigidTransform3 localPose,
+        ComponentRegistry? overrides = null)
+    {
+        var entity = CreateEntityUninitialized(protoName, parent, localPose, overrides);
+        InitializeAndStartEntity(entity, TransformQuery.GetComponent(parent).MapID);
+        return entity;
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public EntityUid Spawn(string? protoName = null, ComponentRegistry? overrides = null, bool doMapInit = true)
     {
