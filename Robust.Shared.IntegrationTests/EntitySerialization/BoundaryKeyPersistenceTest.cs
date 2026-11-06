@@ -16,6 +16,9 @@ namespace Robust.UnitTesting.Shared.EntitySerialization;
 internal sealed partial class BoundaryKeySaveTestComponent : Component
 {
     [DataField] public BoundaryKey Key;
+    [DataField] public BoundarySegment? Segment;
+    [DataField] public SpatialSurfaceReference? Surface;
+    [DataField] public SlabSurface? Slab;
 }
 
 [TestFixture]
@@ -34,7 +37,16 @@ public sealed class BoundaryKeyPersistenceTest : RobustIntegrationTest
             var frame = entities.SpawnAttachedTo(null, map, RigidTransform3.Identity);
             var segment = entities.SpawnAttachedTo(null, frame, RigidTransform3.Identity);
             var key = new BoundaryKey(frame, new LayerId(29), -7, 4, BoundaryAxis.Vertical);
-            entities.EnsureComponent<BoundaryKeySaveTestComponent>(segment).Key = key;
+            var source = entities.EnsureComponent<BoundaryKeySaveTestComponent>(segment);
+            source.Key = key;
+            source.Segment = new BoundarySegment(key, new SurfaceId(71), 0.2f, -0.5f, 3,
+                new[] { new BoundaryOpening(0.25f, 0.75f, 1, 2) }, "test-profile", segment, 12);
+            source.Surface = new SpatialSurfaceReference(frame, source.Segment.Surface);
+            source.Slab = new SlabSurface(new SpatialSurfaceReference(frame, new SurfaceId(72)), key.LayerId,
+                new Box2(-1, -1, 1, 1), 0, 0.2f, new[] { new Box2(-0.25f, -0.25f, 0.25f, 0.25f) });
+            var layer = new LayerDefinition(4.25f, "Test layer");
+            var originalBounds = source.Segment.BuildSolidParts(layer).Select(s => s.Bounds).ToArray();
+            var originalSlabBounds = source.Slab.BuildSolidParts(layer).Select(s => s.Bounds).ToArray();
             var path = new ResPath("/boundary-prefab.yml");
             Assert.That(loader.TrySaveEntity(frame, path), Is.True);
             entities.DeleteEntity(frame);
@@ -48,12 +60,24 @@ public sealed class BoundaryKeyPersistenceTest : RobustIntegrationTest
                 using var children = entities.GetComponent<TransformComponent>(loaded).ChildEnumerator;
                 Assert.That(children.MoveNext(out var child), Is.True);
                 Assert.That(children.MoveNext(out _), Is.False);
-                var restored = entities.GetComponent<BoundaryKeySaveTestComponent>(child).Key;
+                var restoredComponent = entities.GetComponent<BoundaryKeySaveTestComponent>(child);
+                var restored = restoredComponent.Key;
                 restored.Validate();
                 Assert.That(restored.OwnerFrame, Is.EqualTo(loaded.Owner));
                 Assert.That(restored.OwnerFrame, Is.Not.EqualTo(frame));
                 Assert.That(restored.LayerId, Is.EqualTo(key.LayerId));
                 Assert.That(restored.Endpoints(), Is.EqualTo(key.Endpoints()));
+                var restoredSegment = restoredComponent.Segment;
+                Assert.That(restoredSegment, Is.Not.Null);
+                Assert.That(restoredSegment!.Key, Is.EqualTo(restored));
+                Assert.That(restoredSegment.Entity, Is.EqualTo(child));
+                Assert.That(restoredSegment.Surface, Is.EqualTo(source.Segment.Surface));
+                Assert.That(restoredComponent.Surface, Is.EqualTo(new SpatialSurfaceReference(loaded.Owner, source.Segment.Surface)));
+                Assert.That(restoredSegment.Openings, Is.EqualTo(source.Segment.Openings));
+                Assert.That(restoredSegment.BuildSolidParts(layer).Select(s => s.Bounds), Is.EqualTo(originalBounds));
+                Assert.That(restoredComponent.Slab, Is.Not.Null);
+                Assert.That(restoredComponent.Slab!.Surface, Is.EqualTo(new SpatialSurfaceReference(loaded.Owner, source.Slab.Surface.Surface)));
+                Assert.That(restoredComponent.Slab.BuildSolidParts(layer).Select(s => s.Bounds), Is.EqualTo(originalSlabBounds));
                 keys.Add(restored);
             }
             Assert.That(keys, Has.Count.EqualTo(2));

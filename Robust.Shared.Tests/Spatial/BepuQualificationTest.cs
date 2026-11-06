@@ -7,6 +7,9 @@ using BepuPhysics.Trees;
 using BepuUtilities;
 using BepuUtilities.Memory;
 using NUnit.Framework;
+using Robust.Shared.GameObjects;
+using Robust.Shared.Maths;
+using Robust.Shared.Spatial;
 
 namespace Robust.Shared.Tests.Spatial;
 
@@ -17,6 +20,81 @@ namespace Robust.Shared.Tests.Spatial;
 [TestFixture]
 public sealed class BepuQualificationTest
 {
+    [Test]
+    public void CanonicalSlabHasOpenShaftAndCollidableTopAndUnderside()
+    {
+        var pool = new BufferPool();
+        try
+        {
+            using var simulation = Simulation.Create(pool, new Contacts(), new Gravity(), new SolveDescription(8, 1));
+            var slab = new SlabSurface(new SpatialSurfaceReference(new EntityUid(1), new SurfaceId(2)), new LayerId(3),
+                new Box2(-2, -2, 2, 2), 0, 0.2f, new[] { new Box2(-0.5f, -0.5f, 0.5f, 0.5f) });
+            foreach (var solid in slab.BuildSolidParts(new LayerDefinition(3.6f, "Deck")))
+            {
+                var size = solid.Bounds.Size;
+                simulation.Statics.Add(new StaticDescription(solid.Bounds.Center,
+                    simulation.Shapes.Add(new Box(size.X, size.Y, size.Z))));
+            }
+            var shaft = new RayHit { Distance = float.PositiveInfinity };
+            simulation.RayCast(new Vector3(0, 0, 5), -Vector3.UnitZ, 4, ref shaft);
+            Assert.That(shaft.Distance, Is.EqualTo(float.PositiveInfinity));
+            var above = new RayHit { Distance = float.PositiveInfinity };
+            simulation.RayCast(new Vector3(1, 0, 5), -Vector3.UnitZ, 4, ref above);
+            Assert.That(above.Distance, Is.EqualTo(1.4f).Within(1e-5));
+            var below = new RayHit { Distance = float.PositiveInfinity };
+            simulation.RayCast(new Vector3(1, 0, 2), Vector3.UnitZ, 4, ref below);
+            Assert.That(below.Distance, Is.EqualTo(1.4f).Within(1e-5));
+            var fall = new SweepHit();
+            simulation.Sweep(new Sphere(0.1f), new RigidPose(new Vector3(0, 0, 5)),
+                new BodyVelocity(-Vector3.UnitZ), 4, pool, ref fall);
+            Assert.That(fall.Hit, Is.False);
+            var supported = new SweepHit();
+            simulation.Sweep(new Sphere(0.1f), new RigidPose(new Vector3(1, 0, 5)),
+                new BodyVelocity(-Vector3.UnitZ), 4, pool, ref supported);
+            Assert.That(supported.Hit, Is.True);
+            Assert.That(supported.Time, Is.EqualTo(1.3f).Within(0.001));
+        }
+        finally { pool.Clear(); }
+    }
+
+    [Test]
+    public void CanonicalWindowSolidsPreserveRayAndSweepClearanceInRotatedFrame()
+    {
+        var pool = new BufferPool();
+        try
+        {
+            using var simulation = Simulation.Create(pool, new Contacts(), new Gravity(), new SolveDescription(8, 1));
+            var key = new BoundaryKey(new EntityUid(1), new LayerId(7), 0, 0, BoundaryAxis.Horizontal);
+            var segment = new BoundarySegment(key, new SurfaceId(8), 0.2f, 0, 3,
+                new[] { new BoundaryOpening(0.25f, 0.75f, 1, 2) });
+            var frame = new RigidTransform3(new Vector3(5, -7, 11), Quaternion.CreateFromYawPitchRoll(0.2f, -0.5f, 0.7f));
+            foreach (var solid in segment.BuildSolidParts(new LayerDefinition(0, "Deck")))
+            {
+                var size = solid.Bounds.Size;
+                simulation.Statics.Add(new StaticDescription(frame.TransformPoint(solid.Bounds.Center), frame.Rotation,
+                    simulation.Shapes.Add(new Box(size.X, size.Y, size.Z))));
+            }
+            var direction = frame.TransformVector(Vector3.UnitY);
+            var gapOrigin = frame.TransformPoint(new Vector3(0.5f, -1, 1.5f));
+            var gap = new RayHit { Distance = float.PositiveInfinity };
+            simulation.RayCast(gapOrigin, direction, 2, ref gap);
+            Assert.That(gap.Distance, Is.EqualTo(float.PositiveInfinity));
+            foreach (var origin in new[] { new Vector3(0.1f, -1, 1.5f), new Vector3(0.5f, -1, 0.5f), new Vector3(0.5f, -1, 2.5f) })
+            {
+                var hit = new RayHit { Distance = float.PositiveInfinity };
+                simulation.RayCast(frame.TransformPoint(origin), direction, 2, ref hit);
+                Assert.That(hit.Distance, Is.EqualTo(0.9f).Within(1e-5f));
+            }
+            var fits = new SweepHit();
+            simulation.Sweep(new Sphere(0.1f), new RigidPose(gapOrigin), new BodyVelocity(direction), 2, pool, ref fits);
+            Assert.That(fits.Hit, Is.False);
+            var tooWide = new SweepHit();
+            simulation.Sweep(new Sphere(0.3f), new RigidPose(gapOrigin), new BodyVelocity(direction), 2, pool, ref tooWide);
+            Assert.That(tooWide.Hit, Is.True);
+        }
+        finally { pool.Clear(); }
+    }
+
     [TestCase(30)]
     [TestCase(60)]
     public void ContinuousDetectionStopsRotatingBodyAtWall(int tickRate)

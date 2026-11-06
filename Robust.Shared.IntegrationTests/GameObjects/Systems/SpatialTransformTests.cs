@@ -386,4 +386,26 @@ public sealed class SpatialTransformTests
             new RigidTransform3(new Vector3(1, 2, 3), Quaternion.Identity));
         Assert.That(entities.GetComponent<TransformComponent>(valid).LocalPose.Position, Is.EqualTo(new Vector3(1, 2, 3)));
     }
+
+    [Test]
+    public void UninitializedSpatialSpawnsCanBeCancelledOrDeletedWithTheirParent()
+    {
+        var sim = RobustServerSimulation.NewSimulation().InitializeInstance();
+        var entities = sim.Resolve<IEntityManager>();
+        var map = entities.System<SharedMapSystem>().CreateMap();
+        var parent = entities.SpawnAttachedTo(null, map, RigidTransform3.Identity);
+        var pose = new RigidTransform3(new Vector3(1, 2, 3), Quaternion.Identity);
+        var cancelled = entities.CreateEntityUninitialized(null, parent, pose);
+        entities.DeleteEntity(cancelled);
+        Assert.That(entities.EntityExists(cancelled), Is.False);
+        Assert.That(entities.GetComponent<TransformComponent>(parent).ChildCount, Is.Zero);
+
+        var child = entities.CreateEntityUninitialized(null, parent, pose);
+        var grandchild = entities.CreateEntityUninitialized(null, child, pose);
+        entities.DeleteEntity(parent);
+        Assert.That(entities.EntityExists(parent), Is.False);
+        Assert.That(entities.EntityExists(child), Is.False);
+        Assert.That(entities.EntityExists(grandchild), Is.False);
+        Assert.That(entities.GetComponent<TransformComponent>(map).ChildCount, Is.Zero);
+    }
 }

@@ -1,35 +1,52 @@
-# Spatial geometry addressing (E02, in progress)
+# Canonical spatial geometry (E02, in progress)
 
-`BoundaryKey` implements the canonical address from architecture §6.2:
-owner frame, local layer ID, integer X/Y and Horizontal/Vertical axis. X/Y
-identify the lesser endpoint of a unit edge in the authoring grid. Horizontal
-extends toward +X and Vertical toward +Y. Adjacent cells share one key for their
-common edge; reversing its endpoints does not produce another construction slot.
+Geometry belongs to the existing transform frame. `SpatialFrameComponent` owns
+local layer definitions; `SpatialGeometryComponent` stores schema version,
+revision, boundary segments and structural slabs. No independent XYZ entity
+positions or physics handles are stored here.
 
-`LayerId` is a stable unsigned local identifier. It is not an elevation, map ID,
-or globally unique identifier. A layer address includes its owner frame. The
-owner uses the existing EntityUid runtime reference; the entity serializer writes
-file-local IDs and remaps them independently for each prefab instance. A boundary
-key is deliberately not marked NetSerializable: a geometry wire descriptor must
-use NetEntity for the owner instead of transmitting runtime EntityUid values.
+`BoundaryKey` addresses a unit authoring-grid edge by owner frame, local layer,
+integer X/Y and Horizontal/Vertical axis. The lesser endpoint extends toward +X
+or +Y. Adjacent cells and reversed endpoints identify the same construction.
+Grid transforms mirror X, rotate counterclockwise in quarter turns, then translate
+and normalize. Checked wider arithmetic supports negative coordinates without
+wrapping. Arbitrary world rotations remain in the frame transform.
 
-Prefab grid transforms mirror X, apply a counterclockwise quarter-turn rotation,
-then translate and normalize endpoints. Arithmetic rejects unrepresentable grid
-coordinates instead of wrapping into another construction slot. Wider intermediate
-values permit transformations whose final endpoints fit despite an intermediate
-reflection exceeding Int32. Arbitrary world rotation remains in the owner frame's
-canonical transform and does not rewrite its local boundary addresses.
+`LayerId` and `SurfaceId` are stable local identifiers, scoped by their owner frame.
+They are not elevations or global entity IDs. The map serializer remaps owner and
+optional source entity references independently for each prefab instance. Runtime
+references containing EntityUid deliberately lack NetSerializable; wire records
+must use NetEntity. A surface ID survives decomposition into multiple solid parts.
 
-Eight unit cases cover shared edges, negative coordinates, all grid symmetries,
-known rotation/reflection results, frame/layer scope, T-junction edge identity,
-invalid edges, overflow, and stable scalar layer IDs. An integration fixture saves
-a real entity prefab and loads two independent copies, checking owner remapping,
-local layer IDs, unchanged endpoints, and rejection/cleanup of an invalid saved
-edge. All 533 Shared unit tests and 1237 Shared integration tests pass.
-This is address normalization, not
-generation of corner meshes or removal of internal mesh faces.
+`BoundarySegment` supplies thickness, base elevation, height, material identifier,
+revision and real rectangular openings. Subtracting their union preserves jambs,
+sills and lintels; overlapping openings do not duplicate voids or solid parts.
+`SlabSurface` supplies a footprint, top elevation, downward thickness and through
+openings. One slab supplies both floor and ceiling collision. A bridge, a lower
+floor and an open shaft can occupy the same XY region at independent elevations.
+Decorative tiles are separate from structural slabs.
 
-E02/G2 is not complete. Layer definitions and sparse storage, surface identities,
-segments with thickness and real openings, slabs, revisioned geometry snapshots,
-and their physics/query/render consumers remain to be implemented. The address
-types do not create a second world or a second source of entity coordinates.
+Both forms produce frame-local `SpatialSolidPart` boxes with semantic surface,
+source entity, material and revision references. This CPU representation is usable
+without a GPU or Content dependency. Real BEPU ray/sphere-sweep qualification tests
+consume these same boxes, including a rotated frame, a window, slab top/underside
+and a clear shaft. This is not yet an ECS physics backend or render mesh builder;
+corner unions and internal-face removal remain work for geometry consumers.
+
+`SharedGeometrySystem.ConfigureInitialGeometry` validates a whole candidate before
+replacing initial canonical data. It rejects duplicate edges, duplicate surface
+IDs across walls and slabs, foreign frames, missing layers and inconsistent
+revisions. Live edits cannot use this initialization API. `CaptureSnapshot` copies
+semantic definitions into read-only collections and derives solid parts once for
+consumer jobs. A captured snapshot remains independent of later initialization
+changes and deletion. Consumers must separately validate revisions before installing
+job results; the runtime transaction mechanism is not implemented yet.
+
+Map saves contain semantic definitions and revisions, never derived boxes, meshes
+or backend indices. Integration tests save, restore and explicitly clone a world,
+check entity/surface remapping, and reject malformed geometry. Geometry is not
+replicated as an unbounded ordinary component state: chunk streaming remains E07.
+
+E02/G2 remains open. Sparse tile chunks, complete corner/mesh topology, runtime
+transactions and the query, physics, graph and renderer integrations still need
+to be completed and qualified together with Content.
