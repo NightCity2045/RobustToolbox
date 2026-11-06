@@ -1,5 +1,6 @@
 ﻿using Lidgren.Network;
 using Robust.Shared.Serialization;
+using Robust.Shared.Spatial;
 
 #nullable disable
 
@@ -14,6 +15,7 @@ namespace Robust.Shared.Network.Messages.Handshake
         public byte[] VerifyToken;
         public byte[] PublicKey;
         public bool WantHwid;
+        public SpatialProtocolStamp Protocol = SpatialProtocol.Current;
 
         public override void ReadFromBuffer(NetIncomingMessage buffer, IRobustSerializer serializer)
         {
@@ -22,6 +24,7 @@ namespace Robust.Shared.Network.Messages.Handshake
             var keyLength = buffer.ReadVariableInt32();
             PublicKey = buffer.ReadBytes(keyLength);
             WantHwid = buffer.ReadBoolean();
+            Protocol = SpatialProtocol.Read(buffer);
         }
 
         public override void WriteToBuffer(NetOutgoingMessage buffer, IRobustSerializer serializer)
@@ -31,6 +34,7 @@ namespace Robust.Shared.Network.Messages.Handshake
             buffer.WriteVariableInt32(PublicKey.Length);
             buffer.Write(PublicKey);
             buffer.Write(WantHwid);
+            SpatialProtocol.Write(buffer, Protocol);
         }
     }
 }

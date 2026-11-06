@@ -45,6 +45,11 @@ namespace Robust.Shared.Network
 
                 var msgLogin = new MsgLoginStart();
                 msgLogin.ReadFromBuffer(incPacket, _serializer);
+                if (Spatial.SpatialProtocol.Rejection(msgLogin.Protocol) is { } protocolError)
+                {
+                    connection.Disconnect(protocolError);
+                    return;
+                }
 
                 var ip = connection.RemoteEndPoint.Address;
                 var isLocal = IPAddress.IsLoopback(ip) && _config.GetCVar(CVars.AuthAllowLocal);

@@ -38,6 +38,11 @@ def main():
     sdk = subprocess.check_output(["dotnet", "--version"], cwd=ROOT, text=True).strip()
     packages = ET.parse(ROOT / "Directory.Packages.props")
     physics = packages.find(".//PackageVersion[@Include='BepuPhysics']").attrib["Version"]
+    protocol = json.loads((ROOT / "Robust.Shared/Spatial/spatial-protocol.json").read_text(encoding="utf-8"))
+    if protocol["physics_backend"] != "BepuPhysics" or protocol["physics_version"] != physics:
+        raise RuntimeError("Spatial protocol descriptor does not match the pinned physics dependency")
+    canonical_protocol = "".join(f"{key}={protocol[key]}\n" for key in sorted(protocol))
+    protocol_fingerprint = hashlib.sha256(canonical_protocol.encode("utf-8")).hexdigest().upper()
 
     with tempfile.TemporaryDirectory(prefix="robust-standalone-") as temporary:
         stage = Path(temporary) / "client"
@@ -61,7 +66,8 @@ def main():
         manifest = {"schema_version": 1, "kind": "standalone-engine-client",
                     "engine_commit": source_commit, "source_dirty": dirty,
                     "runtime": args.runtime, "sdk": sdk, "physics_backend": "BepuPhysics",
-                    "physics_version": physics, "files": files}
+                    "physics_version": physics, "spatial_protocol": protocol,
+                    "spatial_protocol_fingerprint": protocol_fingerprint, "files": files}
         (stage / "engine-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
         # Create exclusively: never silently replace a previously accepted artifact.
         with zipfile.ZipFile(output, "x", compression=zipfile.ZIP_DEFLATED) as archive:

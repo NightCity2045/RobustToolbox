@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <PackageReference Include="SpaceWizards.NetSerializer" />
+    <ProjectReference Include="..\Lidgren.Network\Lidgren.Network.csproj" />
     <ProjectReference Include="..\Robust.Client\Robust.Client.csproj" />
     <ProjectReference Include="..\Robust.Server.Testing\Robust.Server.Testing.csproj" />
     <ProjectReference Include="..\Robust.Server\Robust.Server.csproj" />

@@ -1,0 +1,10 @@
+{
+  "id": "ss14-spatial-295",
+  "wire_revision": 1,
+  "map_format": 8,
+  "transform_schema": 1,
+  "world_schema": 1,
+  "geometry_schema": 1,
+  "physics_backend": "BepuPhysics",
+  "physics_version": "2.4.0"
+}

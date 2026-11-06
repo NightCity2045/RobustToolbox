@@ -45,6 +45,7 @@
     <EmbeddedResource Include="Utility\TypeAbbreviations.yaml">
       <LogicalName>Robust.Shared.Utility.TypeAbbreviations.yaml</LogicalName>
     </EmbeddedResource>
+    <EmbeddedResource Include="Spatial\spatial-protocol.json" LogicalName="Robust.SpatialProtocol" />
     <None Remove="ContentPack\Sandbox.yml" />
     <EmbeddedResource Include="ContentPack\Sandbox.yml">
       <LogicalName>Robust.Shared.ContentPack.Sandbox.yml</LogicalName>

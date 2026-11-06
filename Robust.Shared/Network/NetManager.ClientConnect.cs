@@ -156,6 +156,8 @@ namespace Robust.Shared.Network
                 // Need to authenticate, packet is MsgEncryptionRequest
                 var encRequest = new MsgEncryptionRequest();
                 encRequest.ReadFromBuffer(response, _serializer);
+                if (Spatial.SpatialProtocol.Rejection(encRequest.Protocol) is { } challengeError)
+                    throw new ConnectionFailedException(challengeError);
 
                 var sharedSecret = new byte[SharedKeyLength];
                 RandomNumberGenerator.Fill(sharedSecret);
@@ -232,6 +234,8 @@ namespace Robust.Shared.Network
 
             var msgSuc = new MsgLoginSuccess();
             msgSuc.ReadFromBuffer(response, _serializer);
+            if (Spatial.SpatialProtocol.Rejection(msgSuc.Protocol) is { } protocolError)
+                throw new ConnectionFailedException(protocolError);
 
             var channel = new NetChannel(this, connection, msgSuc.UserData with { HWId = [..legacyHwid] }, msgSuc.Type);
             _channels.Add(connection, channel);
