@@ -41,9 +41,11 @@ internal sealed class SpatialBackendBodyDefinition
     public SpatialBackendMaterial Material { get; }
     public uint CollisionLayer { get; }
     public uint CollisionMask { get; }
+    public bool LockRotation { get; }
 
     public SpatialBackendBodyDefinition(SpatialBackendMotion motion, IEnumerable<SpatialBackendPart> parts,
-        float mass = 1, SpatialBackendMaterial? material = null, uint collisionLayer = 1, uint collisionMask = uint.MaxValue)
+        float mass = 1, SpatialBackendMaterial? material = null, uint collisionLayer = 1, uint collisionMask = uint.MaxValue,
+        bool lockRotation = false)
     {
         if (!Enum.IsDefined(motion))
             throw new ArgumentOutOfRangeException(nameof(motion));
@@ -68,6 +70,7 @@ internal sealed class SpatialBackendBodyDefinition
         Material.Validate();
         CollisionLayer = collisionLayer;
         CollisionMask = collisionMask;
+        LockRotation = lockRotation;
     }
 
     internal static void ValidateShape(SpatialConvexShape shape)
@@ -98,7 +101,7 @@ internal readonly record struct SpatialBackendCastHit(SpatialBackendBodyId Body,
     float Fraction, Vector3? Point, Vector3? Normal, int ChildIndex = 0);
 
 internal readonly record struct SpatialBackendOverlap(SpatialBackendBodyId Body, SpatialBackendPart Source,
-    IReadOnlyList<SpatialContactGeometry> Contacts);
+    IReadOnlyList<SpatialContactGeometry> Contacts, int ChildIndex = 0);
 
 internal interface ISpatialPhysicsBackend : IDisposable
 {

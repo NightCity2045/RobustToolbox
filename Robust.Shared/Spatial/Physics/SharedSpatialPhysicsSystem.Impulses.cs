@@ -13,13 +13,13 @@ public sealed partial class SharedSpatialPhysicsSystem
 {
     /// <summary>
     /// Apply world-space momentum at a world-space point. Only an active, unpaused
-    /// dynamic body is eligible; contained/static/motor bodies cannot receive a
+    /// dynamic body or motor is eligible; contained/static bodies cannot receive a
     /// hidden physical impulse. Zero momentum has no effect or event.
     /// </summary>
     public void ApplyImpulse(Entity<SpatialBodyComponent> body, Vector3 worldImpulse, Vector3 worldPoint)
     {
         RequireServer();
-        if (TerminatingOrDeleted(body) || body.Comp.Definition.Owner != SpatialMotionOwner.DynamicBody
+        if (TerminatingOrDeleted(body) || !IsDynamicOwner(body.Comp.Definition.Owner)
             || !_bindings.TryGetValue(body, out var binding) || binding.Paused || MetaData(binding.World).EntityPaused)
             throw new InvalidOperationException("An impulse requires an active, unpaused dynamic body.");
         var backend = _worlds[binding.World];

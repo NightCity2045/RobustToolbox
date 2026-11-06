@@ -5,9 +5,9 @@ implementation owns its simulation, pooled buffers, compound indices and body
 handles. It accepts neutral body definitions and returns neutral body states and
 source-qualified ray hits. `SharedSpatialPhysicsSystem` connects this backend to
 explicit spatial world profiles and ECS bodies. The ordinary content maps and
-prototypes have not been migrated or enabled by this engine change. Motor,
-client collision streaming
-and prediction remain required integration work.
+prototypes have not been migrated or enabled by this engine change. Compound
+child ownership, client collision streaming and prediction remain required
+integration work.
 
 Static, dynamic and kinematic bodies use compound box, sphere and Z-axis capsule
 parts. Each part retains optional Entity/Surface references and a geometry
@@ -15,10 +15,10 @@ revision. Ray queries apply a caller-supplied mask and optional ignored body.
 Collision masks must permit both sides of a contact. Physical coefficients are
 engine-neutral values, separate from content prototype/material identifiers.
 Kinematic velocity integration alone does not implement safe door/platform motion;
-the controller must supply checked movement through the upcoming sweep/motor API.
-The current ECS activation path accepts Static and DynamicBody owners. Motor and
-AnchoredCompoundChild definitions require their forthcoming integrations and fail
-explicitly if activated prematurely.
+the controller must supply checked movement through spatial queries and apply
+content's explicit obstruction policy. The ECS activation path accepts Static,
+DynamicBody and Motor owners. AnchoredCompoundChild still requires its compound
+attachment integration and fails explicitly if activated prematurely.
 
 Dynamic compounds are recentered for correct inertia. The adapter converts poses
 and linear velocities at the canonical entity origin to/from the backend center
@@ -235,3 +235,47 @@ remain in force. An ownership change cannot leave a connection without a dynamic
 participant. Map save/restore/clone and connected-client tests cover the revision.
 The caller supplies momentum policy and checks placement/permission; this operation
 alone is not a motor clearance check or a geometry transaction.
+
+## Capsule motor
+
+`SpatialMotorComponent` supplies neutral settings and `SpatialMotorIntent` to a
+body with the Motor owner and one local-Z capsule. It stores no second pose or
+velocity. `ConfigureInitialMotor`, `SetMotorIntent` and `SetMotorSettings` accept
+content-authorized inputs. Walking interprets desired world velocity relative to
+support; Free controls all axes with bounded acceleration and gravity compensation;
+Disabled stops control impulses while ordinary physics continues. Jump permission,
+stamina, posture policy and damage are content responsibilities. Content can apply
+an authorized jump through `ApplyImpulse`.
+
+The motor is a finite-mass dynamic participant in the same fixed physics step.
+Its angular inertia is locked to retain the capsule's orientation. Bounded control
+impulses precede contact solving and CCD; a dynamic support receives the equal and
+opposite reaction at the support point. Support motion includes angular point
+velocity exactly once. Ordinary hierarchy motion does not carry a free motor a
+second time. A fixed joint requires an angularly dynamic participant; content must
+select an appropriate body owner/profile when switching to a seat constraint.
+
+Capsule sweeps/manifolds find walkable support and constrain steps, ceilings and
+volume changes. Stair search includes one capsule radius beyond this tick's travel
+to find the top past a rounded edge, with full upward/forward/downward clearance.
+Only the checked vertical correction is applied; physics integrates horizontal
+motion once. Walkable ramps are not treated as stairs. Control cannot continuously
+drive uphill into an unwalkable slope; gravity and physical momentum still act.
+Existing support can snap down within its configured probe distance; an ascending
+jump is not snapped back. Bilateral masks and connection collision suppression
+apply to motor queries as well as physical contacts.
+
+`TryResizeMotor` preserves the capsule foot in the entity frame and checks actual
+convex penetration against the current scene before revisioned body replacement.
+Touching an existing floor is allowed, new ceiling/wall penetration is rejected.
+Contained/paused bodies cannot resize through this active-clearance API. Generic
+`ReconfigureBody` remains an explicit lower-level operation whose caller supplies
+placement policy; it must not replace this clearance check for posture changes.
+
+`SpatialMotorSupportChanged` and `SpatialMotorLanded` are delivered after canonical
+poses, velocities and support witnesses are committed. Landing supplies pre-step
+velocity relative to the support; event handlers can delete entities/worlds safely.
+Support references use NetEntity on the wire and are rebuilt after map restore;
+controller settings/intent and the resized physical definition persist. Clients
+receive authoritative state without a second authoritative solver. E07 prediction,
+collision baselines and content character migration are still pending.

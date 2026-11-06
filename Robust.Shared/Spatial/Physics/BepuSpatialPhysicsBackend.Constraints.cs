@@ -30,6 +30,8 @@ internal sealed partial class BepuSpatialPhysicsBackend
         if ((a.Definition.Motion != SpatialBackendMotion.Dynamic || a.Paused)
             && (b.Definition.Motion != SpatialBackendMotion.Dynamic || b.Paused))
             throw new InvalidOperationException("A constraint requires at least one dynamic participant.");
+        if (definition.Kind == SpatialConstraintKind.Fixed && !CanRotate(a) && !CanRotate(b))
+            throw new InvalidOperationException("A fixed connection requires a participant with angular inertia.");
         var localA = definition.LocalAnchorA - a.Center;
         var localB = definition.LocalAnchorB - b.Center;
         var relative = definition.RelativePose;
@@ -96,6 +98,9 @@ internal sealed partial class BepuSpatialPhysicsBackend
             attached.Add(id);
         }
     }
+
+    private static bool CanRotate(Entry entry) => entry.Definition.Motion == SpatialBackendMotion.Dynamic
+        && !entry.Definition.LockRotation && !entry.Paused;
 
     public void RemoveConstraint(SpatialBackendConstraintId id)
     {

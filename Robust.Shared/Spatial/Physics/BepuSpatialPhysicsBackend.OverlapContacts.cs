@@ -73,7 +73,7 @@ internal sealed partial class BepuSpatialPhysicsBackend
             if (contacts.Count == 0)
                 return;
             var pair = pairs[pairId];
-            result.Add(new SpatialBackendOverlap(pair.Body, pair.Source, contacts.AsReadOnly()));
+            result.Add(new SpatialBackendOverlap(pair.Body, pair.Source, contacts.AsReadOnly(), pair.ChildIndex));
         }
         public void OnChildPairCompleted(int pairId, int childA, int childB, ref ConvexContactManifold manifold) { }
         public bool AllowCollisionTesting(int pairId, int childA, int childB) => true;

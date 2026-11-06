@@ -40,7 +40,7 @@ public sealed partial class SharedSpatialPhysicsSystem
             if (!_containers.IsEntityOrParentInContainer(body))
             {
                 var id = prepared.Commit(solverState);
-                if (paused && copy.Owner == SpatialMotionOwner.DynamicBody)
+                if (paused && IsDynamicOwner(copy.Owner))
                     backend.SetPaused(id, true);
                 replacement = new Binding(body, world.Value, id, copy.UseGeometry, geometryRevision, paused, revision);
             }
@@ -60,17 +60,19 @@ public sealed partial class SharedSpatialPhysicsSystem
 
     private void ValidateConstraintOwnershipChange(EntityUid body, SpatialBodyDefinition next)
     {
-        if (next.Owner == SpatialMotionOwner.DynamicBody)
-            return;
         foreach (var component in _constraintComponents.Values)
         {
             var d = component.Definition;
             if (d.BodyA != body && d.BodyB != body)
                 continue;
             var other = d.BodyA == body ? d.BodyB : d.BodyA;
-            if (!TryComp<SpatialBodyComponent>(other, out var participant)
-                || participant.Definition.Owner != SpatialMotionOwner.DynamicBody)
+            var otherOwner = TryComp<SpatialBodyComponent>(other, out var participant)
+                ? participant.Definition.Owner : SpatialMotionOwner.Static;
+            if (!IsDynamicOwner(next.Owner) && !IsDynamicOwner(otherOwner))
                 throw new InvalidOperationException("Reconfiguration would leave a connection without a dynamic participant.");
+            if (d.Kind == SpatialConstraintKind.Fixed && next.Owner != SpatialMotionOwner.DynamicBody
+                && otherOwner != SpatialMotionOwner.DynamicBody)
+                throw new InvalidOperationException("A fixed connection requires a participant with angular inertia.");
         }
     }
 }

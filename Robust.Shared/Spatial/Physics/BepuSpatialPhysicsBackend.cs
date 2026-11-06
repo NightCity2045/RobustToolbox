@@ -62,7 +62,7 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
     {
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(definition);
-        ValidateState(state, definition.Motion);
+        ValidateState(state, definition);
         using var prepared = PrepareBody(definition);
         return prepared.Commit(state);
     }
@@ -109,6 +109,8 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
             {
                 builder.BuildDynamicCompound(out children, out inertia, out center);
                 ValidateInertia(inertia);
+                if (definition.LockRotation)
+                    inertia.InverseInertiaTensor = default;
             }
             else
                 builder.BuildKinematicCompound(out children);
@@ -194,7 +196,7 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
     {
         ThrowIfDisposed();
         var entry = _entries[id];
-        ValidateState(state, entry.Definition.Motion);
+        ValidateState(state, entry.Definition);
         if (entry.Paused && (state.LinearVelocity != Vector3.Zero || state.AngularVelocity != Vector3.Zero))
             throw new InvalidOperationException("A frozen solver body cannot receive velocity until resumed.");
         var pose = ToSolverPose(state.Pose, entry.Center);
@@ -306,13 +308,15 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
         => reference.Mobility == CollidableMobility.Static
             ? _statics[reference.StaticHandle.Value] : _bodies[reference.BodyHandle.Value];
 
-    private static void ValidateState(SpatialBackendState state, SpatialBackendMotion motion)
+    private static void ValidateState(SpatialBackendState state, SpatialBackendBodyDefinition definition)
     {
         if (!state.Pose.IsValid || !SpatialBackendBodyDefinition.Finite(state.LinearVelocity)
             || !SpatialBackendBodyDefinition.Finite(state.AngularVelocity))
             throw new ArgumentException("Body pose and velocities must be finite.");
-        if (motion == SpatialBackendMotion.Static && (state.LinearVelocity != Vector3.Zero || state.AngularVelocity != Vector3.Zero))
+        if (definition.Motion == SpatialBackendMotion.Static && (state.LinearVelocity != Vector3.Zero || state.AngularVelocity != Vector3.Zero))
             throw new ArgumentException("A static body cannot have a velocity.");
+        if (definition.LockRotation && state.AngularVelocity != Vector3.Zero)
+            throw new ArgumentException("A rotation-locked body cannot have angular velocity.");
     }
 
     private static RigidPose ToSolverPose(RigidTransform3 pose, Vector3 center)

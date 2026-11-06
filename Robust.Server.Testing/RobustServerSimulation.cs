@@ -327,6 +327,7 @@ namespace Robust.UnitTesting.Server
             compFactory.RegisterClass<Robust.Shared.Spatial.SpatialGeometryComponent>();
             compFactory.RegisterClass<Robust.Shared.Spatial.Physics.SpatialBodyComponent>();
             compFactory.RegisterClass<Robust.Shared.Spatial.Physics.SpatialConstraintComponent>();
+            compFactory.RegisterClass<Robust.Shared.Spatial.Physics.SpatialMotorComponent>();
             compFactory.RegisterClass<Robust.Shared.Spatial.Physics.SpatialPhysicsWorldComponent>();
             compFactory.RegisterClass<MapLightComponent>();
             compFactory.RegisterClass<PhysicsComponent>();

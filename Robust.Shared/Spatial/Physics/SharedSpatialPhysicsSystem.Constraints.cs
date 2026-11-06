@@ -87,8 +87,10 @@ public sealed partial class SharedSpatialPhysicsSystem
             throw new InvalidOperationException("A connection and both bodies must belong to the same spatial physics world.");
         var a = Motion(definition.BodyA);
         var b = Motion(definition.BodyB);
-        if (a != SpatialMotionOwner.DynamicBody && b != SpatialMotionOwner.DynamicBody)
+        if (!IsDynamicOwner(a) && !IsDynamicOwner(b))
             throw new InvalidOperationException("A constraint requires at least one dynamic participant.");
+        if (definition.Kind == SpatialConstraintKind.Fixed && a != SpatialMotionOwner.DynamicBody && b != SpatialMotionOwner.DynamicBody)
+            throw new InvalidOperationException("A fixed connection requires a participant with angular inertia.");
 
         SpatialMotionOwner Motion(EntityUid entity)
         {
@@ -125,11 +127,15 @@ public sealed partial class SharedSpatialPhysicsSystem
             || a.World != b.World || SpatialPhysicsOwnership.GetMap(EntityManager, uid) != a.World
             || !_worlds.TryGetValue(a.World, out var backend))
             return null;
-        var dynamicA = !a.Paused && TryComp<SpatialBodyComponent>(definition.BodyA, out var bodyA)
-            && bodyA.Definition.Owner == SpatialMotionOwner.DynamicBody;
-        var dynamicB = !b.Paused && TryComp<SpatialBodyComponent>(definition.BodyB, out var bodyB)
-            && bodyB.Definition.Owner == SpatialMotionOwner.DynamicBody;
+        var dynamicA = TryComp<SpatialBodyComponent>(definition.BodyA, out var bodyA) && !a.Paused
+            && IsDynamicOwner(bodyA.Definition.Owner);
+        var dynamicB = TryComp<SpatialBodyComponent>(definition.BodyB, out var bodyB) && !b.Paused
+            && IsDynamicOwner(bodyB.Definition.Owner);
         if (!dynamicA && !dynamicB)
+            return null;
+        if (definition.Kind == SpatialConstraintKind.Fixed
+            && !(dynamicA && bodyA!.Definition.Owner == SpatialMotionOwner.DynamicBody)
+            && !(dynamicB && bodyB!.Definition.Owner == SpatialMotionOwner.DynamicBody))
             return null;
         var id = backend.AddConstraint(definition.ToBackend(a.Body, b.Body));
         return new ConstraintBinding(a.World, id, a.Body, b.Body, definition);

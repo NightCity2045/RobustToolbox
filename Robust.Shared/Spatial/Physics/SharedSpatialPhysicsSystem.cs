@@ -35,6 +35,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
     {
         base.Initialize();
         InitializeConstraints();
+        InitializeMotors();
         SubscribeLocalEvent<SpatialPhysicsWorldComponent, ComponentStartup>(OnWorldStartup);
         SubscribeLocalEvent<SpatialPhysicsWorldComponent, ComponentShutdown>(OnWorldShutdown);
         SubscribeLocalEvent<SpatialPhysicsWorldComponent, ComponentGetState>(OnWorldGetState);
@@ -62,6 +63,8 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
         _constraintBindings.Clear();
         _constraintComponents.Clear();
         _semanticContacts.Clear();
+        _motors.Clear();
+        _motorIncomingVelocity.Clear();
         base.Shutdown();
     }
 
@@ -113,6 +116,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
         if (!_net.IsServer || frameTime <= 0)
             return;
         SyncConstraints();
+        PrepareMotors(frameTime);
         foreach (var (world, backend) in _worlds)
         {
             if (MetaData(world).EntityPaused)
@@ -126,7 +130,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
         {
             if (!_worlds.TryGetValue(binding.World, out var backend) || TerminatingOrDeleted(binding.Entity)
                 || MetaData(binding.World).EntityPaused || !TryComp<SpatialBodyComponent>(binding.Entity, out var component)
-                || component.Definition.Owner != SpatialMotionOwner.DynamicBody)
+                || !IsDynamicOwner(component.Definition.Owner))
                 continue;
             var state = backend.GetState(binding.Body);
             poses.Add(binding.Entity, state.Pose);
@@ -150,6 +154,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
             });
         }
         finally { _committing = false; }
+        PublishMotorSupports();
         PublishContacts();
     }
 
@@ -218,7 +223,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
             foreach (var uid in subtree)
             {
                 if (uid == root || !_bindings.TryGetValue(uid, out var binding) || TerminatingOrDeleted(uid)
-                    || !TryComp<SpatialBodyComponent>(uid, out var body) || body.Definition.Owner != SpatialMotionOwner.DynamicBody
+                    || !TryComp<SpatialBodyComponent>(uid, out var body) || !IsDynamicOwner(body.Definition.Owner)
                     || _containers.IsEntityOrParentInContainer(uid) || !_worlds.TryGetValue(binding.World, out var backend))
                     continue;
                 _transforms.SetWorldPose(binding.Entity, backend.GetState(binding.Body).Pose);
@@ -309,7 +314,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
         {
             if (existing.Paused != paused)
             {
-                if (definition.Owner == SpatialMotionOwner.DynamicBody)
+                if (IsDynamicOwner(definition.Owner))
                     backend.SetPaused(existing.Body, paused);
                 _bindings[uid] = existing with { Paused = paused };
             }
@@ -326,7 +331,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
             return;
         }
         var id = backend.AddBody(backendDefinition, state);
-        if (paused && definition.Owner == SpatialMotionOwner.DynamicBody)
+        if (paused && IsDynamicOwner(definition.Owner))
             backend.SetPaused(id, true);
         RemoveBinding(uid);
         _bindings.Add(uid, new Binding(uid, map.Value, id, definition.UseGeometry, revision, paused, definitionRevision));
@@ -374,7 +379,8 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
         }
         return new SpatialBackendBodyDefinition(
             definition.Owner == SpatialMotionOwner.Static ? SpatialBackendMotion.Static : SpatialBackendMotion.Dynamic,
-            parts, definition.Mass, definition.Material.ToBackend(), definition.CollisionLayer, definition.CollisionMask);
+            parts, definition.Mass, definition.Material.ToBackend(), definition.CollisionLayer, definition.CollisionMask,
+            lockRotation: definition.Owner == SpatialMotionOwner.Motor);
     }
 
     private void RemoveBinding(EntityUid uid)
@@ -389,10 +395,12 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
         definition.Validate();
         if (HasComp<PhysicsComponent>(uid))
             throw new InvalidOperationException("An entity cannot have both planar and spatial physics owners.");
-        if (definition.Owner == SpatialMotionOwner.DynamicBody && (Transform(uid).NoLocalRotation || Transform(uid).Anchored))
+        if (IsDynamicOwner(definition.Owner) && (Transform(uid).NoLocalRotation || Transform(uid).Anchored))
             throw new InvalidOperationException("Dynamic spatial motion requires physics-owned rotation and compound-aware anchoring.");
-        if (definition.Owner is SpatialMotionOwner.Motor or SpatialMotionOwner.AnchoredCompoundChild)
+        if (definition.Owner == SpatialMotionOwner.AnchoredCompoundChild)
             throw new InvalidOperationException("This movement owner requires its motor or compound-attachment integration.");
+        if (definition.Owner == SpatialMotionOwner.Motor)
+            ValidateMotorBody(uid, definition, angular);
         if (!SpatialBackendBodyDefinition.Finite(linear) || !SpatialBackendBodyDefinition.Finite(angular)
             || definition.Owner == SpatialMotionOwner.Static && (linear != Vector3.Zero || angular != Vector3.Zero))
             throw new ArgumentException("Invalid spatial body velocity.");

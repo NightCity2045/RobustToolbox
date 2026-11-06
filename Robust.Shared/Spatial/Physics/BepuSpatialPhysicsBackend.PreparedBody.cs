@@ -27,7 +27,7 @@ internal sealed partial class BepuSpatialPhysicsBackend
         {
             owner.ThrowIfDisposed();
             var prepared = _entry ?? throw new InvalidOperationException("Prepared body has already been consumed or disposed.");
-            BepuSpatialPhysicsBackend.ValidateState(state, prepared.Definition.Motion);
+            BepuSpatialPhysicsBackend.ValidateState(state, prepared.Definition);
             ValidateSolverState(ToSolverPose(state.Pose, prepared.Center), ToSolverVelocity(state, prepared.Center));
         }
 
@@ -43,7 +43,7 @@ internal sealed partial class BepuSpatialPhysicsBackend
 
     private SpatialBackendBodyId CommitBody(Entry entry, SpatialBackendState state)
     {
-        ValidateState(state, entry.Definition.Motion);
+        ValidateState(state, entry.Definition);
         var pose = ToSolverPose(state.Pose, entry.Center);
         var velocity = ToSolverVelocity(state, entry.Center);
         ValidateSolverState(pose, velocity);
