@@ -71,6 +71,30 @@ public sealed partial class SpatialQuerySystem : EntitySystem, ISpatialQueryServ
     public IReadOnlyList<SpatialHit> Overlap(SpatialQueryContext context, SpatialShape shape, RigidTransform3 pose)
         => ShapeCast(context, shape, pose, Vector3.Zero, Vector3.Zero);
 
+    public IReadOnlyList<SpatialOverlap> OverlapContacts(SpatialQueryContext context, SpatialShape shape, RigidTransform3 pose)
+    {
+        ArgumentNullException.ThrowIfNull(shape);
+        shape.Validate();
+        if (!pose.IsValid)
+            throw new ArgumentException("Overlap query requires a valid pose.");
+        var (backend, frame) = ValidateContext(context);
+        _querying = true;
+        try
+        {
+            var result = new List<SpatialOverlap>();
+            foreach (var hit in backend.OverlapContacts(shape.ToBackend(), frame.Compose(pose), context.Mask))
+            {
+                if (!Allow(context, hit.Source))
+                    continue;
+                var source = hit.Source;
+                result.Add(new SpatialOverlap(new SpatialQueryCandidate(source.Entity, source.Surface,
+                    source.MaterialProfile, source.Revision), hit.Contacts));
+            }
+            return result.AsReadOnly();
+        }
+        finally { _querying = false; }
+    }
+
     public bool IsVolumeFree(SpatialQueryContext context, SpatialShape shape, RigidTransform3 pose)
         => Overlap(context, shape, pose).Count == 0;
 

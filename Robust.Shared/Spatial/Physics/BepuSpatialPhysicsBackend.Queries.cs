@@ -87,7 +87,7 @@ internal sealed partial class BepuSpatialPhysicsBackend
                 // BEPU's sweep API. Preserve that distinction for motor/placement.
                 var initial = fraction <= 0;
                 hits.Add(new SpatialBackendCastHit(entry.Id, entry.Definition.Parts[index], fraction,
-                    initial ? null : pose.Position + location, initial ? null : normal));
+                    initial ? null : pose.Position + location, initial ? null : normal, index));
             }
         }
         hits.Sort(static (a, b) => a.Fraction.CompareTo(b.Fraction));

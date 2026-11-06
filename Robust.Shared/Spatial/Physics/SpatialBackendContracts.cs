@@ -95,7 +95,10 @@ internal readonly record struct SpatialBackendHit(SpatialBackendBodyId Body, Spa
 
 /// <summary>Fraction of the requested motion; an initial overlap has no unique contact point/normal.</summary>
 internal readonly record struct SpatialBackendCastHit(SpatialBackendBodyId Body, SpatialBackendPart Source,
-    float Fraction, Vector3? Point, Vector3? Normal);
+    float Fraction, Vector3? Point, Vector3? Normal, int ChildIndex = 0);
+
+internal readonly record struct SpatialBackendOverlap(SpatialBackendBodyId Body, SpatialBackendPart Source,
+    IReadOnlyList<SpatialContactGeometry> Contacts);
 
 internal interface ISpatialPhysicsBackend : IDisposable
 {
@@ -114,5 +117,7 @@ internal interface ISpatialPhysicsBackend : IDisposable
     IReadOnlyList<SpatialBackendCastHit> ShapeCast(SpatialConvexShape shape, RigidTransform3 pose,
         Vector3 translation, Vector3 angularDisplacement, uint mask, SpatialBackendBodyId? ignoredBody = null);
     IReadOnlyList<SpatialBackendCastHit> Overlap(SpatialConvexShape shape, RigidTransform3 pose,
+        uint mask, SpatialBackendBodyId? ignoredBody = null);
+    IReadOnlyList<SpatialBackendOverlap> OverlapContacts(SpatialConvexShape shape, RigidTransform3 pose,
         uint mask, SpatialBackendBodyId? ignoredBody = null);
 }

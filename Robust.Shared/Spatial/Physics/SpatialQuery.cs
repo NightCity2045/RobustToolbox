@@ -44,6 +44,10 @@ public sealed class SpatialQueryContext
 public readonly record struct SpatialQueryCandidate(EntityUid? Entity, SpatialSurfaceReference? Surface,
     string MaterialProfile, ulong Revision);
 
+/// <summary>A world-space manifold witness. Normal separates the query shape from the scene shape.</summary>
+public readonly record struct SpatialContactGeometry(Vector3 Point, Vector3 Normal, float Depth);
+public readonly record struct SpatialOverlap(SpatialQueryCandidate Source, IReadOnlyList<SpatialContactGeometry> Contacts);
+
 /// <summary>A read-only policy. Implementations must not mutate entities or query recursively.</summary>
 public interface ISpatialQueryFilter
 {
@@ -67,6 +71,7 @@ public interface ISpatialQueryService
     IReadOnlyList<SpatialHit> ShapeCast(SpatialQueryContext context, SpatialShape shape, RigidTransform3 pose,
         Vector3 translation, Vector3 angularDisplacement);
     IReadOnlyList<SpatialHit> Overlap(SpatialQueryContext context, SpatialShape shape, RigidTransform3 pose);
+    IReadOnlyList<SpatialOverlap> OverlapContacts(SpatialQueryContext context, SpatialShape shape, RigidTransform3 pose);
     bool IsVolumeFree(SpatialQueryContext context, SpatialShape shape, RigidTransform3 pose);
     SpatialHit? FindSurface(SpatialQueryContext context, Vector3 origin, Vector3 unitDirection, float distance);
 }

@@ -205,3 +205,14 @@ sleep, pause and resume do not manufacture a fresh collision. Queries continue t
 see the frozen collider. Backend and ECS tests cover sleep/pause, surface seams,
 rotated offset parts, deletion from event handlers and 300 m/s thin-wall contacts
 at both 30 and 60 Hz.
+
+`OverlapContacts` additionally returns detached convex manifold witnesses with
+world normals and penetration depths. It distinguishes a touching support from an
+actual occupied volume for resize/depenetration consumers. The adapter selects
+candidates through the same shape-query path, then runs BEPU's collision batcher
+without inserting a temporary body, stepping the simulation or emitting gameplay
+contacts. Internal compound child indices retain source identity across batch
+flushes. The existing sweep InitialOverlap result remains explicitly witness-free;
+callers request a manifold when they need penetration information. A manifold
+normal is a solver-selected separating direction, not a claim of a unique witness
+for completely overlapping shapes.

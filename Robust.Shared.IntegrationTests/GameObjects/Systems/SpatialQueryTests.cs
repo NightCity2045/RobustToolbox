@@ -53,6 +53,12 @@ public sealed class SpatialQueryTests
         var shape = new SpatialSphereShape(0.1f);
         Assert.That(queries.IsVolumeFree(context, shape, new RigidTransform3(new Vector3(3, 0, 5), Quaternion.Identity)), Is.True);
         Assert.That(queries.IsVolumeFree(context, shape, new RigidTransform3(new Vector3(3, 0, 1.75f), Quaternion.Identity)), Is.False);
+        var penetration = queries.OverlapContacts(context, shape,
+            new RigidTransform3(new Vector3(3, 0, 1.8f), Quaternion.Identity)).Single();
+        Assert.That(penetration.Source.Surface, Is.EqualTo(surface));
+        Assert.That(penetration.Source.MaterialProfile, Is.EqualTo("test-floor"));
+        Assert.That(penetration.Contacts.Max(c => c.Depth), Is.EqualTo(0.05f).Within(1e-4));
+        Assert.That(penetration.Contacts.All(c => c.Normal.Z > 0.99f), Is.True);
         var cast = queries.ShapeCast(filtered, shape, new RigidTransform3(new Vector3(3, 0, 5), Quaternion.Identity),
             -Vector3.UnitZ * 5, Vector3.Zero);
         Assert.That(cast, Has.Count.EqualTo(1));
