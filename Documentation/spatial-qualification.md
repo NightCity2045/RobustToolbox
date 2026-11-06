@@ -23,6 +23,8 @@ The fixture checks +Z-up gravity and support at fixed 30/60Hz, body removal,
 raycasts distinguishing vertically stacked surfaces, height-aware shape sweeps,
 a rotating bar sweep that hits between its clear endpoint poses, and a 300m/s sphere against
 a 0.1m wall. Tests run without GPU or game content. They are not benchmarks.
+The constraint case suspends a dynamic body from a kinematic anchor, verifies
+the retained height, removes the anchor and verifies the released body falls.
 
 CCD qualification exposed two independent settings that must be recorded with
 the eventual physics profile: temporal sweep tolerance versus speed/thickness,
@@ -38,7 +40,7 @@ Reference for those semantics:
 https://github.com/bepu/bepuphysics2/blob/v2.4.0/Documentation/ContinuousCollisionDetection.md
 
 Still required before E00 is closed: overlap and rotating dynamic-body CCD,
-compound/constraint cases, loading through the trusted Robust engine path with
+compound cases, loading through the trusted Robust engine path with
 content sandbox enabled, supported platform runs, allocation/performance
 budgets, GPU reference profile and the joint packaging/client acceptance.
 Cross-platform bitwise determinism is not assumed.

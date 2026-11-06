@@ -18,6 +18,35 @@ namespace Robust.Shared.Tests.Spatial;
 public sealed class BepuQualificationTest
 {
     [Test]
+    public void ConstraintHoldsBodyAndReleasesWhenAnchorIsRemoved()
+    {
+        var pool = new BufferPool();
+        try
+        {
+            using var simulation = Simulation.Create(pool, new Contacts(), new Gravity(), new SolveDescription(8, 1));
+            var sphere = new Sphere(0.1f);
+            var shape = simulation.Shapes.Add(sphere);
+            var anchor = simulation.Bodies.Add(BodyDescription.CreateKinematic(new Vector3(0, 0, 3), shape, 0.01f));
+            var body = simulation.Bodies.Add(BodyDescription.CreateDynamic(new Vector3(0, 0, 2),
+                sphere.ComputeInertia(1), shape, 0.01f));
+            simulation.Solver.Add(anchor, body, new BallSocket
+            {
+                LocalOffsetA = Vector3.Zero,
+                LocalOffsetB = Vector3.UnitZ,
+                SpringSettings = new SpringSettings(30, 1)
+            });
+            for (var tick = 0; tick < 120; tick++)
+                simulation.Timestep(1f / 60);
+            Assert.That(simulation.Bodies.GetBodyReference(body).Pose.Position.Z, Is.EqualTo(2).Within(0.03f));
+            simulation.Bodies.Remove(anchor);
+            for (var tick = 0; tick < 60; tick++)
+                simulation.Timestep(1f / 60);
+            Assert.That(simulation.Bodies.GetBodyReference(body).Pose.Position.Z, Is.LessThan(1));
+        }
+        finally { pool.Clear(); }
+    }
+
+    [Test]
     public void RotatingShapeSweepDetectsObstacleBetweenEndpointPoses()
     {
         var pool = new BufferPool();
