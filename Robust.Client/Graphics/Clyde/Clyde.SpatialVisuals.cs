@@ -70,7 +70,7 @@ internal sealed partial class Clyde
                 GL.BindVertexArray(_visualMeshes[visual.Shape].Vao);
                 program.SetUniform("uModel", visual.Model, transpose: false);
                 if (material.DoubleSided) GL.Disable(EnableCap.CullFace); else GL.Enable(EnableCap.CullFace);
-                SetMaterialTexture(program, material, visual.Uv);
+                SetMaterialTexture(program, material, visual.Uv, visual.Modulate);
                 if (pass >= 0)
                 {
                     SetLights(scene, visual.Pose.TransformPoint(visual.Bounds.Center), visual.Bounds.Size.Length() * 0.5f);

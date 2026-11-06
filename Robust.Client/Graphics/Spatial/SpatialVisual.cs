@@ -26,20 +26,23 @@ public sealed record SpatialVisualInstance
     public UIBox2 Uv { get; }
     public EntityUid? Entity { get; }
     public SpatialSurfaceReference? Surface { get; }
+    public Vector4 Modulate { get; }
     public Box3 Bounds { get; }
     public Matrix4x4 Model => Matrix4x4.CreateScale(Size) * Pose.ToMatrix();
 
     public SpatialVisualInstance(SpatialVisualShape shape, RigidTransform3 pose, Vector3 size, string materialProfile,
-        UIBox2? uv = null, EntityUid? entity = null, SpatialSurfaceReference? surface = null)
+        UIBox2? uv = null, EntityUid? entity = null, SpatialSurfaceReference? surface = null, Vector4? modulate = null)
     {
         var region = uv ?? new UIBox2(0, 0, 1, 1);
+        var tint = modulate ?? Vector4.One;
         if (!Enum.IsDefined(shape) || !pose.IsValid || !Finite(size) || size.X <= 0 || size.Y <= 0 || size.Z <= 0
             || string.IsNullOrWhiteSpace(materialProfile) || !float.IsFinite(region.Left) || !float.IsFinite(region.Top)
             || !float.IsFinite(region.Right) || !float.IsFinite(region.Bottom) || region.Left < 0 || region.Top < 0
             || region.Right > 1 || region.Bottom > 1 || region.Width <= 0 || region.Height <= 0
-            || entity is { } uid && !uid.IsValid())
+            || entity is { } uid && !uid.IsValid() || !ValidColor(tint))
             throw new ArgumentException("Invalid spatial visual geometry, UV region or identity.");
         Shape = shape; Pose = pose; Size = size; MaterialProfile = materialProfile; Uv = region; Entity = entity; Surface = surface;
+        Modulate = tint;
         var half = size * 0.5f;
         // Conservative culling bounds only; the rendered quad remains exactly
         // planar and this padding never becomes an authoritative collision shape.
@@ -48,6 +51,8 @@ public sealed record SpatialVisualInstance
     }
 
     internal static bool Finite(Vector3 v) => float.IsFinite(v.X) && float.IsFinite(v.Y) && float.IsFinite(v.Z);
+    internal static bool ValidColor(Vector4 v) => Finite(new Vector3(v.X, v.Y, v.Z)) && float.IsFinite(v.W)
+        && v.X >= 0 && v.Y >= 0 && v.Z >= 0 && v.W >= 0 && v.W <= 1;
 }
 
 /// <summary>
@@ -59,13 +64,10 @@ public sealed record SpatialVisualInstance
 public readonly record struct SpatialSpriteProfile(SpatialSpriteKind Kind, Vector2 Size, Vector2 Pivot, float MaximumTilt)
 {
     public SpatialVisualInstance Resolve(RigidTransform3 canonicalPose, PerspectiveCamera camera, string material,
-        EntityUid? entity = null, UIBox2? uv = null)
+        EntityUid? entity = null, UIBox2? uv = null, Vector4? modulate = null)
     {
-        if (!Enum.IsDefined(Kind) || !canonicalPose.IsValid || !camera.Pose.IsValid
-            || !float.IsFinite(Size.X) || !float.IsFinite(Size.Y) || Size.X <= 0 || Size.Y <= 0
-            || !float.IsFinite(Pivot.X) || !float.IsFinite(Pivot.Y)
-            || !float.IsFinite(MaximumTilt) || MaximumTilt < 0 || MaximumTilt > MathF.PI / 2)
-            throw new ArgumentException("Invalid spatial sprite profile or pose.");
+        Validate();
+        if (!canonicalPose.IsValid || !camera.Pose.IsValid) throw new ArgumentException("Invalid spatial sprite/view pose.");
         var rotation = canonicalPose.Rotation;
         if (Kind == SpatialSpriteKind.DirectionalBillboard)
         {
@@ -91,7 +93,15 @@ public readonly record struct SpatialSpriteProfile(SpatialSpriteKind Kind, Vecto
         }
         var offset = new Vector3((0.5f - Pivot.X) * Size.X, (0.5f - Pivot.Y) * Size.Y, 0);
         var pose = new RigidTransform3(canonicalPose.Position + Vector3.Transform(offset, rotation), rotation);
-        return new SpatialVisualInstance(SpatialVisualShape.Quad, pose, new Vector3(Size, 1), material, uv, entity);
+        return new SpatialVisualInstance(SpatialVisualShape.Quad, pose, new Vector3(Size, 1), material, uv, entity, modulate: modulate);
+    }
+
+    internal void Validate()
+    {
+        if (!Enum.IsDefined(Kind) || !float.IsFinite(Size.X) || !float.IsFinite(Size.Y) || Size.X <= 0 || Size.Y <= 0
+            || !float.IsFinite(Pivot.X) || !float.IsFinite(Pivot.Y)
+            || !float.IsFinite(MaximumTilt) || MaximumTilt < 0 || MaximumTilt > MathF.PI / 2)
+            throw new ArgumentException("Invalid spatial sprite profile.");
     }
 
     internal static Quaternion Basis(Vector3 right, Vector3 up, Vector3 normal)

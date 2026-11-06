@@ -116,6 +116,7 @@ internal sealed partial class SpatialRenderProbeCommand : IConsoleCommand
         CheckOffscreenShadow(Capture, report);
         CheckMaterialMips(Capture, report);
         CheckVisuals(Capture, report);
+        CheckEffects(Capture, report);
         // Repeated independent views may not retain render targets after disposal.
         for (var i = 0; i < 8; i++)
         {
@@ -132,7 +133,7 @@ internal sealed partial class SpatialRenderProbeCommand : IConsoleCommand
         {
             using (var stream = _resources.UserData.OpenWrite(new ResPath($"/{name}.png"))) image.SaveAsPng(stream);
             captures.Add(name, image);
-            if (captures.Count != 16) return;
+            if (captures.Count != 20) return;
             try
             {
                 var original = captures["spatial-probe"];
@@ -189,9 +190,10 @@ internal sealed partial class SpatialRenderProbeCommand : IConsoleCommand
                 report["near_nearest_black_pixels"] = nearBlack; report["near_nearest_white_pixels"] = nearWhite;
                 report["far_isolated_mip_wrong_pixels"] = farWrong;
                 var visuals = CheckVisualPixels(captures, report);
-                report["passed"] = maxDifference <= 2 && markers && slices && spriteFiltered && diagnostic && shadows && materials && visuals;
+                var effects = CheckEffectPixels(captures, report);
+                report["passed"] = maxDifference <= 2 && markers && slices && spriteFiltered && diagnostic && shadows && materials && visuals && effects;
                 _resources.UserData.WriteAllText(new ResPath("/spatial-probe.json"), JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
-                if (maxDifference > 2 || !markers || !slices || !spriteFiltered || !diagnostic || !shadows || !materials || !visuals)
+                if (maxDifference > 2 || !markers || !slices || !spriteFiltered || !diagnostic || !shadows || !materials || !visuals || !effects)
                     throw new InvalidOperationException("Spatial render qualification failed; inspect spatial-probe.json.");
                 Logger.InfoS("spatial.render", "Spatial render probe passed; screenshots and report saved in user data.");
             }

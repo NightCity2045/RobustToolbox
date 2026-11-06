@@ -1,0 +1,8 @@
+// Deterministic engine qualification of ordered screen effects.
+uniform highp vec3 gain;
+uniform highp vec3 bias;
+
+void fragment() {
+    COLOR = zTexture(UV);
+    COLOR.rgb = COLOR.rgb * gain + bias;
+}
