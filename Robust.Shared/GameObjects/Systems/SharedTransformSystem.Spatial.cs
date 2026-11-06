@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Numerics;
 using Robust.Shared.Maths;
 
@@ -114,6 +115,76 @@ public abstract partial class SharedTransformSystem
             return;
         var local = transform.ParentUid.IsValid() ? GetWorldPose(transform.ParentUid).ToLocal(pose) : pose;
         SetLocalPose(uid, local, transform);
+    }
+
+    /// <summary>
+    /// Commit a physics tick before notifying move observers. Parent and child
+    /// local poses are derived from the complete set of final world poses, so an
+    /// observer never sees a free body carried temporarily by its moving parent.
+    /// The trusted caller commits already-validated velocities before notifications.
+    /// </summary>
+    internal void CommitSpatialPoses(IReadOnlyDictionary<EntityUid, RigidTransform3> poses, Action commitVelocities)
+    {
+        var resolved = new Dictionary<EntityUid, RigidTransform3>();
+        var plans = new List<(Entity<TransformComponent, MetaDataComponent> Entity, RigidTransform3 Old, RigidTransform3 Next,
+            bool PositionChanged, bool RotationChanged)>();
+        foreach (var (uid, pose) in poses)
+        {
+            ValidatePose(pose);
+            if (TerminatingOrDeleted(uid))
+                throw new InvalidOperationException("A terminating entity cannot receive a physics pose.");
+            var xform = Transform(uid);
+            var local = xform.ParentUid.IsValid() ? ResolveFinalPose(xform.ParentUid).ToLocal(pose) : pose;
+            var old = xform.LocalPose;
+            var positionChanged = old.Position != local.Position;
+            var rotationChanged = old.Rotation != local.Rotation;
+            if (positionChanged && xform.Anchored || rotationChanged && xform.NoLocalRotation)
+                throw new InvalidOperationException("Physics cannot override another transform movement owner.");
+            if (positionChanged || rotationChanged)
+                plans.Add(((uid, xform, MetaData(uid)), old, local, positionChanged, rotationChanged));
+        }
+
+        // No mutation or external callbacks occurred during preflight.
+        foreach (var plan in plans)
+        {
+            var (uid, xform, meta) = plan.Entity;
+            xform._localPosition3 = plan.Next.Position;
+            xform._localRotation3 = plan.Next.Rotation;
+            xform.MatricesDirty = true;
+            if (plan.PositionChanged)
+                DirtyField(uid, xform, nameof(TransformComponent.LocalPosition), meta);
+            if (plan.RotationChanged)
+                DirtyField(uid, xform, nameof(TransformComponent.LocalRotation), meta);
+        }
+        commitVelocities();
+        foreach (var plan in plans)
+        {
+            if (TerminatingOrDeleted(plan.Entity.Owner) || !plan.Entity.Comp1.Initialized)
+                continue;
+            // Spatial support/frame selection does not use legacy planar grid traversal.
+            RaiseMoveEvent(plan.Entity, plan.Entity.Comp1.ParentUid, plan.Old, plan.Entity.Comp1.MapUid, checkTraversal: false);
+        }
+
+        RigidTransform3 ResolveFinalPose(EntityUid uid)
+        {
+            var pending = new Stack<EntityUid>();
+            var pose = RigidTransform3.Identity;
+            while (uid.IsValid())
+            {
+                if (poses.TryGetValue(uid, out pose) || resolved.TryGetValue(uid, out pose))
+                    break;
+                pending.Push(uid);
+                uid = Transform(uid).ParentUid;
+            }
+            if (!uid.IsValid())
+                pose = RigidTransform3.Identity;
+            while (pending.TryPop(out var ancestor))
+            {
+                pose = pose.Compose(Transform(ancestor).LocalPose);
+                resolved[ancestor] = pose;
+            }
+            return pose;
+        }
     }
 
     /// <summary>Set a complete pose relative to a specified parent, using the same hierarchy mutation path.</summary>

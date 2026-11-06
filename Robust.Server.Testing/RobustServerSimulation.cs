@@ -325,6 +325,8 @@ namespace Robust.UnitTesting.Server
             compFactory.RegisterClass<Robust.Shared.Spatial.SpatialWorldComponent>();
             compFactory.RegisterClass<Robust.Shared.Spatial.SpatialFrameComponent>();
             compFactory.RegisterClass<Robust.Shared.Spatial.SpatialGeometryComponent>();
+            compFactory.RegisterClass<Robust.Shared.Spatial.Physics.SpatialBodyComponent>();
+            compFactory.RegisterClass<Robust.Shared.Spatial.Physics.SpatialPhysicsWorldComponent>();
             compFactory.RegisterClass<MapLightComponent>();
             compFactory.RegisterClass<PhysicsComponent>();
             compFactory.RegisterClass<JointComponent>();
@@ -359,6 +361,7 @@ namespace Robust.UnitTesting.Server
             entitySystemMan.LoadExtraSystemType<MapSystem>();
             entitySystemMan.LoadExtraSystemType<Robust.Shared.Spatial.SharedSpatialSystem>();
             entitySystemMan.LoadExtraSystemType<Robust.Shared.Spatial.SharedGeometrySystem>();
+            entitySystemMan.LoadExtraSystemType<Robust.Shared.Spatial.Physics.SharedSpatialPhysicsSystem>();
             entitySystemMan.LoadExtraSystemType<DebugPhysicsSystem>();
             entitySystemMan.LoadExtraSystemType<DebugRayDrawingSystem>();
             entitySystemMan.LoadExtraSystemType<BroadPhaseSystem>();

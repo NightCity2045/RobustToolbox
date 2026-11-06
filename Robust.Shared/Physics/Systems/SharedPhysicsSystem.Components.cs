@@ -45,6 +45,7 @@ public partial class SharedPhysicsSystem
 
     private void OnPhysicsInit(EntityUid uid, PhysicsComponent component, ComponentInit args)
     {
+        Spatial.Physics.SpatialPhysicsOwnership.ValidateLegacyBody(EntityManager, uid);
         var xform = Transform(uid);
         var manager = EnsureComp<FixturesComponent>(uid);
 

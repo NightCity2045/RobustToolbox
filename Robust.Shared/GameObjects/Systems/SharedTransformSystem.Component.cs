@@ -986,6 +986,8 @@ public abstract partial class SharedTransformSystem
             ancestor = ancestorTransform.ParentUid;
             ancestorTransform = XformQuery.GetComponent(ancestor);
         }
+        if (!_gameTiming.ApplyingState)
+            Spatial.Physics.SpatialPhysicsOwnership.ValidateReparent(EntityManager, uid, parent);
         return newParent;
     }
 
