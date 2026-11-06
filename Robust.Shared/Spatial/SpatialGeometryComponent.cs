@@ -17,6 +17,7 @@ public sealed partial class SpatialGeometryComponent : Component
     [DataField("revision")] internal ulong _revision;
     [DataField("boundaries")] internal List<BoundarySegment> _boundaries = new();
     [DataField("slabs")] internal List<SlabSurface> _slabs = new();
+    [DataField("tileChunks")] internal List<SpatialTileChunk> _tileChunks = new();
 
     public uint Schema => _schema;
     public ulong Revision => _revision;

@@ -15,17 +15,19 @@ public sealed class SharedGeometrySystem : EntitySystem
     }
 
     public void ConfigureInitialGeometry(Entity<SpatialGeometryComponent> frame,
-        IEnumerable<BoundarySegment> boundaries, IEnumerable<SlabSurface> slabs, ulong revision = 0)
+        IEnumerable<BoundarySegment> boundaries, IEnumerable<SlabSurface> slabs, ulong revision = 0,
+        IEnumerable<SpatialTileChunk>? tileChunks = null)
     {
         if (MetaData(frame).EntityLifeStage != EntityLifeStage.PreInit)
             throw new InvalidOperationException("Initial geometry must be configured before entity initialization.");
         if (frame.Comp._schema != SpatialGeometryComponent.CurrentSchema)
             throw new InvalidOperationException($"Unsupported spatial geometry schema {frame.Comp._schema}.");
         var snapshot = new SpatialGeometrySnapshot(frame, revision,
-            Comp<SpatialFrameComponent>(frame)._layers, boundaries, slabs);
+            Comp<SpatialFrameComponent>(frame)._layers, boundaries, slabs, tileChunks ?? Array.Empty<SpatialTileChunk>());
         // Validate everything before replacing any canonical collection.
         frame.Comp._boundaries = snapshot.Boundaries.Values.ToList();
         frame.Comp._slabs = snapshot.Slabs.Values.ToList();
+        frame.Comp._tileChunks = snapshot.TileChunks.Values.ToList();
         frame.Comp._revision = revision;
     }
 
@@ -38,7 +40,7 @@ public sealed class SharedGeometrySystem : EntitySystem
         if (geometry._schema != SpatialGeometryComponent.CurrentSchema)
             throw new InvalidOperationException($"Unsupported spatial geometry schema {geometry._schema}.");
         return new SpatialGeometrySnapshot(frame, geometry._revision, Comp<SpatialFrameComponent>(frame)._layers,
-            geometry._boundaries, geometry._slabs);
+            geometry._boundaries, geometry._slabs, geometry._tileChunks);
     }
 
     /// <summary>Resolve a persistent semantic surface independently of any mesh or physics shape index.</summary>

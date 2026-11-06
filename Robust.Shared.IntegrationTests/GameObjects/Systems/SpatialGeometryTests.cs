@@ -98,4 +98,63 @@ public sealed class SpatialGeometryTests
         entities.AddComponent<SpatialGeometryComponent>(frame);
         return frame;
     }
+
+    [Test]
+    public void SparseFloorCoveringsResolveSlabsWithoutCreatingOrRemovingCollision()
+    {
+        var sim = RobustServerSimulation.NewSimulation().InitializeInstance();
+        var entities = sim.Resolve<IEntityManager>();
+        var world = entities.System<SharedSpatialSystem>().CreateWorld();
+        var geometry = entities.System<SharedGeometrySystem>();
+        var frame = CreateUninitializedFrame(entities, world);
+        var component = entities.GetComponent<SpatialGeometryComponent>(frame);
+        var lower = new LayerId(5);
+        var upper = new LayerId(999);
+        entities.System<SharedSpatialSystem>().ConfigureInitialLayers(
+            (frame, entities.GetComponent<SpatialFrameComponent>(frame)),
+            new Dictionary<LayerId, LayerDefinition>
+            {
+                [lower] = new(0, "Lower"), [upper] = new(38.25f, "Upper")
+            });
+        var cells = new[] { new Vector2i(-1000000, -1), new Vector2i(1000000, 17) };
+        var slabs = new List<SlabSurface>();
+        var chunks = new List<SpatialTileChunk>();
+        uint nextId = 0;
+        foreach (var layer in new[] { lower, upper })
+        foreach (var cell in cells)
+        {
+            var id = new SurfaceId(nextId++);
+            slabs.Add(new SlabSurface(new SpatialSurfaceReference(frame, id), layer,
+                new Box2(cell.X, cell.Y, cell.X + 1, cell.Y + 1), 0, 0.25f));
+            chunks.Add(new SpatialTileChunk(SpatialChunkKey.FromCell(layer, cell),
+                new Dictionary<Vector2i, SpatialFloorTile>
+                {
+                    [SpatialChunkKey.LocalCell(cell)] = new("covering", id)
+                }));
+        }
+        geometry.ConfigureInitialGeometry((frame, component), Array.Empty<BoundarySegment>(), slabs, tileChunks: chunks);
+        var before = geometry.CaptureSnapshot(frame);
+        Assert.That(before.TileChunks, Has.Count.EqualTo(4));
+        Assert.That(before.TileChunks.Values.Sum(c => c.Tiles.Count), Is.EqualTo(4));
+        Assert.That(before.TryGetFloorTile(lower, cells[0], out var a), Is.True);
+        Assert.That(before.TryGetFloorTile(upper, cells[0], out var b), Is.True);
+        Assert.That(a.StructuralSurface, Is.Not.EqualTo(b.StructuralSurface));
+        Assert.That(before.TryGetFloorTile(lower, Vector2i.Zero, out _), Is.False);
+
+        var wrongLayer = new SpatialTileChunk(SpatialChunkKey.FromCell(upper, cells[0]), chunks[0].Tiles);
+        Assert.Throws<ArgumentException>(() => geometry.ConfigureInitialGeometry((frame, component),
+            Array.Empty<BoundarySegment>(), slabs, tileChunks: new[] { wrongLayer }));
+        Assert.Throws<ArgumentException>(() => geometry.ConfigureInitialGeometry((frame, component),
+            Array.Empty<BoundarySegment>(), slabs, tileChunks: new[] { chunks[0], chunks[0] }));
+        Assert.Throws<ArgumentException>(() => geometry.ConfigureInitialGeometry((frame, component),
+            Array.Empty<BoundarySegment>(), Array.Empty<SlabSurface>(), tileChunks: chunks));
+        Assert.That(geometry.CaptureSnapshot(frame).TileChunks.Keys, Is.EqualTo(before.TileChunks.Keys));
+
+        geometry.ConfigureInitialGeometry((frame, component), Array.Empty<BoundarySegment>(), slabs, 1);
+        var withoutCoverings = geometry.CaptureSnapshot(frame);
+        Assert.That(withoutCoverings.TileChunks, Is.Empty);
+        Assert.That(withoutCoverings.SolidParts, Is.EqualTo(before.SolidParts));
+        Assert.That(before.TileChunks, Has.Count.EqualTo(4));
+        entities.DeleteEntity(frame);
+    }
 }

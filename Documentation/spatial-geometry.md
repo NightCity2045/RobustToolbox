@@ -24,7 +24,15 @@ sills and lintels; overlapping openings do not duplicate voids or solid parts.
 `SlabSurface` supplies a footprint, top elevation, downward thickness and through
 openings. One slab supplies both floor and ceiling collision. A bridge, a lower
 floor and an open shaft can occupy the same XY region at independent elevations.
-Decorative tiles are separate from structural slabs.
+Decorative tiles are separate from structural slabs. `SpatialFloorTile` stores an
+opaque covering material and a local structural surface ID. `SpatialTileChunk`
+stores only occupied cells in 16×16 horizontal chunks, addressed by local layer
+and signed chunk coordinates. Missing chunks/layers allocate no dense intervening
+storage. Floor division and local-cell conversion round-trip negative cells and
+Int32 endpoints. Empty, duplicated, out-of-range and future-revision chunks are
+rejected; each tile must reference an existing slab in its own layer. Removing
+all coverings leaves the structural collision unchanged. This canonical lookup
+does not declare missing network collision chunks safe for movement.
 
 Both forms produce frame-local `SpatialSolidPart` boxes with semantic surface,
 source entity, material and revision references. This CPU representation is usable
@@ -47,6 +55,6 @@ or backend indices. Integration tests save, restore and explicitly clone a world
 check entity/surface remapping, and reject malformed geometry. Geometry is not
 replicated as an unbounded ordinary component state: chunk streaming remains E07.
 
-E02/G2 remains open. Sparse tile chunks, complete corner/mesh topology, runtime
+E02/G2 remains open. Complete corner/mesh topology, runtime
 transactions and the query, physics, graph and renderer integrations still need
 to be completed and qualified together with Content.

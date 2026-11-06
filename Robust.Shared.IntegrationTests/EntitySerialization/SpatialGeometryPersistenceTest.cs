@@ -32,7 +32,11 @@ public sealed class SpatialGeometryPersistenceTest : RobustIntegrationTest
             var slab = new SlabSurface(new SpatialSurfaceReference(frame, new SurfaceId(4)), layer,
                 new Box2(-2, -2, 2, 2), 0, 0.2f, new[] { new Box2(-0.5f, -0.5f, 0.5f, 0.5f) }, stateRevision: 10);
             var component = entities.GetComponent<SpatialGeometryComponent>(frame);
-            geometry.ConfigureInitialGeometry((frame, component), new[] { boundary }, new[] { slab }, 12);
+            var cell = new Vector2i(-1, -1);
+            var tile = new SpatialFloorTile("decorative-floor", slab.Surface.Surface);
+            var chunk = new SpatialTileChunk(SpatialChunkKey.FromCell(layer, cell),
+                new Dictionary<Vector2i, SpatialFloorTile> { [SpatialChunkKey.LocalCell(cell)] = tile }, 11);
+            geometry.ConfigureInitialGeometry((frame, component), new[] { boundary }, new[] { slab }, 12, new[] { chunk });
             entities.InitializeAndStartEntity(frame, entities.GetComponent<MapComponent>(world).MapId);
             var original = geometry.CaptureSnapshot(frame);
             var loader = server.System<MapLoaderSystem>();
@@ -42,6 +46,7 @@ public sealed class SpatialGeometryPersistenceTest : RobustIntegrationTest
             {
                 var saved = reader.ReadToEnd();
                 Assert.That(saved, Does.Contain("type: SpatialGeometry"));
+                Assert.That(saved, Does.Contain("tileChunks:"));
                 Assert.That(saved, Does.Not.Contain("solidParts:"));
                 Assert.That(saved, Does.Not.Contain("shapeIndex:"));
             }
@@ -57,6 +62,11 @@ public sealed class SpatialGeometryPersistenceTest : RobustIntegrationTest
                 Assert.That(children.MoveNext(out _), Is.False);
                 var snapshot = geometry.CaptureSnapshot(loadedFrame);
                 Assert.That(snapshot.Revision, Is.EqualTo(12));
+                Assert.That(snapshot.TileChunks, Has.Count.EqualTo(1));
+                Assert.That(snapshot.TileChunks[chunk.Key].StateRevision, Is.EqualTo(11));
+                Assert.That(snapshot.TryGetFloorTile(layer, cell, out var loadedTile), Is.True);
+                Assert.That(loadedTile, Is.EqualTo(tile));
+                Assert.That(snapshot.Slabs[loadedTile.StructuralSurface].Surface.OwnerFrame, Is.EqualTo(loadedFrame));
                 Assert.That(snapshot.SolidParts.Select(p => p.Bounds), Is.EqualTo(original.SolidParts.Select(p => p.Bounds)));
                 Assert.That(snapshot.GetSurfaceParts(new SurfaceId(3)).All(p => p.Entity == loadedFrame), Is.True);
                 Assert.That(snapshot.GetSurfaceParts(new SurfaceId(4)).All(p => p.Entity == null), Is.True);

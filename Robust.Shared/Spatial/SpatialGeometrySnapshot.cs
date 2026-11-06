@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using Robust.Shared.GameObjects;
+using Robust.Shared.Maths;
 
 namespace Robust.Shared.Spatial;
 
@@ -17,18 +18,21 @@ public sealed class SpatialGeometrySnapshot
     public IReadOnlyDictionary<LayerId, LayerDefinition> Layers { get; }
     public IReadOnlyDictionary<BoundaryKey, BoundarySegment> Boundaries { get; }
     public IReadOnlyDictionary<SurfaceId, SlabSurface> Slabs { get; }
+    public IReadOnlyDictionary<SpatialChunkKey, SpatialTileChunk> TileChunks { get; }
     public IReadOnlyList<SpatialSolidPart> SolidParts { get; }
     private readonly Dictionary<SurfaceId, IReadOnlyList<SpatialSolidPart>> _surfaces = new();
 
     internal SpatialGeometrySnapshot(EntityUid frame, ulong revision,
         IReadOnlyDictionary<LayerId, LayerDefinition> layers,
-        IEnumerable<BoundarySegment> boundaries, IEnumerable<SlabSurface> slabs)
+        IEnumerable<BoundarySegment> boundaries, IEnumerable<SlabSurface> slabs,
+        IEnumerable<SpatialTileChunk> tileChunks)
     {
         if (!frame.IsValid())
             throw new ArgumentException("A geometry snapshot requires an owner frame.", nameof(frame));
         ArgumentNullException.ThrowIfNull(layers);
         ArgumentNullException.ThrowIfNull(boundaries);
         ArgumentNullException.ThrowIfNull(slabs);
+        ArgumentNullException.ThrowIfNull(tileChunks);
         OwnerFrame = frame;
         Revision = revision;
         var layerCopy = new Dictionary<LayerId, LayerDefinition>();
@@ -60,6 +64,23 @@ public sealed class SpatialGeometrySnapshot
             slabCopy.Add(copy.Surface.Surface, copy);
             AddSurface(copy.Surface.Surface, copy.StateRevision, copy.BuildSolidParts(layerCopy[copy.Layer]));
         }
+        var chunkCopy = new Dictionary<SpatialChunkKey, SpatialTileChunk>();
+        foreach (var source in tileChunks)
+        {
+            ArgumentNullException.ThrowIfNull(source);
+            if (!layerCopy.ContainsKey(source.Key.Layer))
+                throw new ArgumentException("A tile chunk requires an existing authoring layer.");
+            if (source.StateRevision > revision)
+                throw new ArgumentException("A chunk revision exceeds its geometry snapshot revision.");
+            var copy = new SpatialTileChunk(source.Key, source.Tiles, source.StateRevision);
+            foreach (var tile in copy.Tiles.Values)
+            {
+                if (!slabCopy.TryGetValue(tile.StructuralSurface, out var slab) || slab.Layer != copy.Key.Layer)
+                    throw new ArgumentException("A floor covering must reference a slab in the same frame and layer.");
+            }
+            chunkCopy.Add(copy.Key, copy);
+        }
+        TileChunks = new ReadOnlyDictionary<SpatialChunkKey, SpatialTileChunk>(chunkCopy);
         Layers = new ReadOnlyDictionary<LayerId, LayerDefinition>(layerCopy);
         Boundaries = new ReadOnlyDictionary<BoundaryKey, BoundarySegment>(boundaryCopy);
         Slabs = new ReadOnlyDictionary<SurfaceId, SlabSurface>(slabCopy);
@@ -78,4 +99,12 @@ public sealed class SpatialGeometrySnapshot
 
     public bool ContainsSurface(SurfaceId id) => _surfaces.ContainsKey(id);
     public IReadOnlyList<SpatialSolidPart> GetSurfaceParts(SurfaceId id) => _surfaces[id];
+
+    /// <summary>Lookup in known canonical data; network chunk availability is a separate concern.</summary>
+    public bool TryGetFloorTile(LayerId layer, Vector2i cell, out SpatialFloorTile tile)
+    {
+        tile = default;
+        return TileChunks.TryGetValue(SpatialChunkKey.FromCell(layer, cell), out var chunk)
+            && chunk.TryGetTile(SpatialChunkKey.LocalCell(cell), out tile);
+    }
 }
