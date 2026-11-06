@@ -282,14 +282,11 @@ namespace Robust.Client.ResourceManagement
             // The array must be sorted from biggest to smallest first.
             atlasList.Sort((b, a) => rsiList[a].AtlasSheet.Height.CompareTo(rsiList[b].AtlasSheet.Height));
 
-            #if FULL_RELEASE
-            var maxSize = Math.Min(GL.GetInteger(GetPName.MaxTextureSize), _configurationManager.GetCVar(CVars.ResRSIAtlasSize));
-            #else
-            // For tests
-            var maxSize = 12288;
+            // Packaged headless clients have no OpenGL context, just like the
+            // integration runner. Only graphical clients can query GPU limits.
+            var maxSize = _configurationManager.GetCVar(CVars.ResRSIAtlasSize);
             if (_clyde is not ClydeHeadless)
-                maxSize = Math.Min(GL.GetInteger(GetPName.MaxTextureSize), _configurationManager.GetCVar(CVars.ResRSIAtlasSize));
-            #endif
+                maxSize = Math.Min(GL.GetInteger(GetPName.MaxTextureSize), maxSize);
 
             // THIS IS NOT GUARANTEED TO HAVE ANY PARTICULARLY LOGICAL ORDERING.
             // E.G you could have atlas 1 RSIs appear *before* you're done seeing atlas 2 RSIs.

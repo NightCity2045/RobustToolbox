@@ -63,6 +63,19 @@ standalone packaging on Ubuntu 24.04 and Windows Server 2022, using SDK 10.0.100
 It records the actual hosted image version and uploads evidence. A workflow file
 is not evidence that either remote job has passed.
 
+Both platforms passed 5106 engine tests and standalone packaging at
+`db97755a2452f491e78db1b70081671463fb9acd`, with SDK 10.0.100 confirmed in their
+manifests: https://github.com/NightCity2045/RobustToolbox/actions/runs/42157576456
+The earlier qualification run used 10.0.403 because `latestFeature` selected an
+installed newer SDK. `global.json` now disables roll-forward in this fixed base.
+
+Packaged headless startup exposed an upstream `FULL_RELEASE` path that queried
+OpenGL for the RSI atlas limit without a graphics context. Headless clients now
+use the configured atlas size, while graphical clients still clamp it to the GPU
+limit. `HeadlessPreloadTest` reproduced the OpenGL initialization failure before
+the fix and passes afterward with `-c Release -p:FullRelease=true`. CI runs that
+configuration explicitly, in addition to its ordinary engine suite.
+
 Still required before E00 is closed: loading the updated packaged dependency
 through the trusted Robust path with content sandbox enabled, supported platform
 runs, allocation/performance budgets, GPU reference profile and joint acceptance.

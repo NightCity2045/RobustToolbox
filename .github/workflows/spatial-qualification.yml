@@ -45,6 +45,8 @@ jobs:
         run: dotnet build -m:2
       - name: Run complete engine tests
         run: dotnet test --no-build --no-restore --logger trx --results-directory release/qualification -- NUnit.ConsoleOut=0
+      - name: Verify full-release headless resource loading
+        run: dotnet test Robust.Client.IntegrationTests/Robust.Client.IntegrationTests.csproj -c Release -p:FullRelease=true -m:2 --filter FullyQualifiedName~HeadlessPreloadTest --logger "trx;LogFileName=headless-full-release.trx" --results-directory release/qualification
       - name: Package standalone engine after tests
         run: python Tools/package_standalone_client.py --runtime ${{ matrix.runtime }} --output release/qualification/Robust.Client.Standalone_${{ matrix.runtime }}.zip
       - name: Archive qualification evidence
