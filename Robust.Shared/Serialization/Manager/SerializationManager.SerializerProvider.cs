@@ -426,7 +426,7 @@ public sealed partial class SerializationManager
                     if (arguments.Length != 1)
                         throw new InvalidGenericParameterCountException();
 
-                    _typeSerializers.GetOrNew(typeInterface).TryAdd(arguments[0], obj);
+                    _typeSerializers.GetOrAdd(typeInterface, static _ => new()).TryAdd(arguments[0], obj);
                     RegisterIndexedSerializer(
                         arguments[0],
                         SerializerInterfaces.IndexOf(typeInterface),
@@ -484,7 +484,7 @@ public sealed partial class SerializationManager
                             throw new GenericParameterMismatchException();
                     }
 
-                    _genericTypeSerializers.GetOrNew(typeInterface).TryAdd(arguments[0], type);
+                    _genericTypeSerializers.GetOrAdd(typeInterface, static _ => new()).TryAdd(arguments[0], type);
                 }
 
                 foreach (var typeInterface in _typeNodeInterfaces)
@@ -502,7 +502,7 @@ public sealed partial class SerializationManager
                             throw new GenericParameterMismatchException();
                     }
 
-                    _genericTypeNodeSerializers.GetOrNew(typeInterface).TryAdd((arguments[0], arguments[1]), type);
+                    _genericTypeNodeSerializers.GetOrAdd(typeInterface, static _ => new()).TryAdd((arguments[0], arguments[1]), type);
                 }
             }
 
@@ -552,21 +552,29 @@ public sealed partial class SerializationManager
 
         private void RegisterIndexedSerializer(Type elementType, int interfaceIndex, object serializer, bool regular)
         {
-            var id = SerializedType.GetId(elementType);
-            if (id >= _typeSerializersArray.Length)
-                Array.Resize(ref _typeSerializersArray, (id + 1) * 2);
-
-            var array = _typeSerializersArray[id];
-            if (array == null)
+            // Generic serializers are instantiated concurrently during prototype
+            // loading. Publish growth and the per-type slots under the same lock:
+            // an overlapping smaller resize must not replace a larger array or
+            // discard another registration. Node serializer registration already
+            // uses this lock for the corresponding cache.
+            lock (_lock)
             {
-                array = new (object? Regular, object? Generic)[SerializerInterfaces.Length];
-                _typeSerializersArray[id] = array;
-            }
+                var id = SerializedType.GetId(elementType);
+                if (id >= _typeSerializersArray.Length)
+                    Array.Resize(ref _typeSerializersArray, (id + 1) * 2);
 
-            if (regular)
-                array[interfaceIndex].Regular = serializer;
-            else
-                array[interfaceIndex].Generic = serializer;
+                var array = _typeSerializersArray[id];
+                if (array == null)
+                {
+                    array = new (object? Regular, object? Generic)[SerializerInterfaces.Length];
+                    _typeSerializersArray[id] = array;
+                }
+
+                if (regular)
+                    array[interfaceIndex].Regular = serializer;
+                else
+                    array[interfaceIndex].Generic = serializer;
+            }
         }
 
         private void RegisterIndexedNodeSerializer(Type interfaceIndex, Type elementType, Type nodeType, object serializer, bool regular)
