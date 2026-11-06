@@ -43,6 +43,12 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
 
     public int BodyCount => _entries.Count;
 
+    internal SpatialBackendBodyDefinition GetDefinition(SpatialBackendBodyId body)
+    {
+        ThrowIfDisposed();
+        return _entries[body].Definition;
+    }
+
     public BepuSpatialPhysicsBackend(Vector3 gravity, int substeps = 1, int solverIterations = 8)
     {
         if (!SpatialBackendBodyDefinition.Finite(gravity))

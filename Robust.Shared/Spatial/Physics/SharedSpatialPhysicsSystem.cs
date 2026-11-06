@@ -169,6 +169,8 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
         finally { _committing = false; }
         PublishMotorSupports();
         PublishContacts();
+        var completed = new SpatialPhysicsStepCompleted();
+        RaiseLocalEvent(ref completed);
     }
 
     private void OnWorldStartup(EntityUid uid, SpatialPhysicsWorldComponent component, ComponentStartup args)
