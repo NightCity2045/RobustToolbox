@@ -60,6 +60,13 @@ namespace Robust.Shared.GameObjects
 
         internal static Quaternion WithYaw(Quaternion rotation, Angle yaw)
         {
+            yaw = SharedTransformSystem.NormalizeRotation(yaw);
+            // In a planar pose there is no tilt to preserve. Reconstruct the requested
+            // yaw directly so resetting to zero cannot accumulate cancellation error.
+            if (rotation.X == 0 && rotation.Y == 0)
+                return new RigidTransform3(Vector3.Zero,
+                    Quaternion.CreateFromAxisAngle(Vector3.UnitZ, (float) yaw.Theta)).Rotation;
+
             var delta = SharedTransformSystem.NormalizeRotation(yaw - ProjectYaw(rotation));
             return new RigidTransform3(Vector3.Zero, Quaternion.Concatenate(rotation,
                 Quaternion.CreateFromAxisAngle(Vector3.UnitZ, (float) delta.Theta))).Rotation;

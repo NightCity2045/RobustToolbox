@@ -1,5 +1,4 @@
 using Robust.Shared.GameObjects;
-using Robust.Shared.Map;
 using Robust.Shared.Maths;
 using Robust.Shared.Physics.Components;
 using Robust.Shared.Utility;
@@ -16,7 +15,7 @@ public abstract partial class SharedContainerSystem
     /// </summary>
     /// <remarks>
     /// If the insertion is successful, the inserted entity will end up parented to the
-    /// container entity, and the inserted entity's local position will be set to the zero vector.
+    /// container entity, with identity local position and orientation.
     /// </remarks>
     /// <param name="toInsert">The entity to insert.</param>
     /// <param name="container">The container to insert into.</param>
@@ -107,7 +106,7 @@ public abstract partial class SharedContainerSystem
 
         // Attach to new parent
         var oldParent = transform.ParentUid;
-        _transform.SetCoordinates(toInsert, transform, new EntityCoordinates(container.Owner, Vector2.Zero), Angle.Zero);
+        _transform.SetParentLocalPose(toInsert, container.Owner, RigidTransform3.Identity, transform);
         transform.Broadphase = old;
 
         // the transform.AttachParent() could previously result in the flag being unset, so check that this hasn't happened.
@@ -128,8 +127,7 @@ public abstract partial class SharedContainerSystem
         DebugTools.Assert((meta.Flags & MetaDataFlags.InContainer) != 0, "invalid metadata flags after events");
         DebugTools.Assert(!transform.Anchored, "entity is anchored");
         DebugTools.AssertEqual(transform.ParentUid, container.Owner, "Wrong parent");
-        DebugTools.AssertEqual(transform.LocalPosition, Vector2.Zero);
-        DebugTools.Assert(MathHelper.CloseTo(transform.LocalRotation.Theta, Angle.Zero), "Angle is not zero");
+        DebugTools.AssertEqual(transform.LocalPose, RigidTransform3.Identity, "Contained entity pose is not identity");
         DebugTools.Assert(!PhysicsQuery.TryGetComponent(toInsert, out var phys) || (!phys.Awake && !phys.CanCollide), "Invalid physics");
 
         Dirty(container.Owner, container.Manager);

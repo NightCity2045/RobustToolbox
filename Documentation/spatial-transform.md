@@ -61,6 +61,16 @@ writes and runs before state application changes anchors; temporary authoritativ
 cycle repair is committed only after validation. All 1226 Shared integration tests
 pass with this additional fix.
 
+Container insertion now sets the complete identity local pose. Ordinary removal
+reparents using the full world pose, preserving inherited height and orientation.
+The destination parent is still selected by the legacy planar grid lookup; spatial
+support selection belongs to the remaining physics/query integration. Explicit
+legacy removal destinations still carry their existing XY-only contract.
+Resetting a purely planar yaw constructs the quaternion directly, avoiding residual
+angles that violated container invariants during equipment creation. Six regression
+cases cover exact yaw reset and container insertion/removal; all 1232 Shared
+integration tests pass. The full content pair must be requalified after this fix.
+
 E01/G1 is not complete. Spatial-world profiles, stable world/layer/surface IDs,
 diagnostics for implicit planar calls, and full movement ownership/lifecycle
 integration remain. The existing physics, query, renderer, and PVS implementations

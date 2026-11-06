@@ -2,6 +2,7 @@ using System.Numerics;
 using NUnit.Framework;
 using Robust.Shared.GameObjects;
 using Robust.Shared.GameStates;
+using Robust.Shared.Containers;
 using Robust.Shared.Map;
 using Robust.Shared.Maths;
 using Robust.UnitTesting.Server;
@@ -205,5 +206,46 @@ public sealed class SpatialTransformTests
             Assert.That(entities.GetComponent<TransformComponent>(child).ParentUid, Is.EqualTo(uid));
             Assert.That(transform.LocalPose, Is.EqualTo(before));
         });
+    }
+
+    [TestCase(13)]
+    [TestCase(37)]
+    [TestCase(123)]
+    [TestCase(287)]
+    [TestCase(359)]
+    public void PlanarYawResetHasExactIdentityOrientation(int degrees)
+    {
+        var sim = RobustServerSimulation.NewSimulation().InitializeInstance();
+        var entities = sim.Resolve<IEntityManager>();
+        var map = sim.CreateMap().MapId;
+        var transforms = entities.System<SharedTransformSystem>();
+        var uid = entities.Spawn(null, new MapCoordinates(Vector2.Zero, map));
+        transforms.SetLocalRotation(uid, Angle.FromDegrees(degrees));
+        transforms.SetLocalRotation(uid, Angle.Zero);
+        Assert.That(entities.GetComponent<TransformComponent>(uid).LocalPose.Rotation, Is.EqualTo(Quaternion.Identity));
+    }
+
+    [Test]
+    public void ContainerInsertionUsesIdentityPoseAndRemovalPreservesWorldPose()
+    {
+        var sim = RobustServerSimulation.NewSimulation().InitializeInstance();
+        var entities = sim.Resolve<IEntityManager>();
+        var map = sim.CreateMap().MapId;
+        var transforms = entities.System<SharedTransformSystem>();
+        var containers = entities.System<SharedContainerSystem>();
+        var owner = entities.Spawn(null, new MapCoordinates(Vector2.Zero, map));
+        var item = entities.Spawn(null, new MapCoordinates(Vector2.Zero, map));
+        var ownerPose = new RigidTransform3(new Vector3(-3, 4, 7), Quaternion.CreateFromYawPitchRoll(0.4f, -0.7f, 0.3f));
+        transforms.SetLocalPose(owner, ownerPose);
+        transforms.SetLocalPose(item, new RigidTransform3(new Vector3(1, -8, 13), Quaternion.CreateFromYawPitchRoll(-0.3f, 0.2f, 0.8f)));
+        var container = containers.EnsureContainer<Container>(owner, "spatial");
+        Assert.That(containers.Insert(item, container), Is.True);
+        var transform = entities.GetComponent<TransformComponent>(item);
+        Assert.That(transform.LocalPose, Is.EqualTo(RigidTransform3.Identity));
+        Assert.That(transform.ParentUid, Is.EqualTo(owner));
+        SamePose(transforms.GetWorldPose(item), ownerPose);
+        Assert.That(containers.Remove(item, container), Is.True);
+        SamePose(transforms.GetWorldPose(item), ownerPose);
+        Assert.That(container.ContainedEntities, Is.Empty);
     }
 }

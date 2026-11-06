@@ -1908,7 +1908,9 @@ public abstract partial class SharedTransformSystem
         if (coordinates.Value.EntityId == xform.ParentUid || coordinates.Value.EntityId == uid)
             return;
 
-        SetCoordinates(uid, xform, coordinates.Value);
+        // The planar lookup selects the destination parent. Reparent using the full
+        // pose so leaving a container does not discard inherited height or tilt.
+        SetParent(uid, xform, coordinates.Value.EntityId);
     }
 
     /// <summary>
