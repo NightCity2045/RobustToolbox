@@ -20,6 +20,56 @@ namespace Robust.UnitTesting.Shared.EntitySerialization;
 public sealed class SpatialPhysicsPersistenceTest : RobustIntegrationTest
 {
     [Test]
+    public async Task ConstraintSaveRestoreAndCloneRemapBothParticipants()
+    {
+        using var server = StartServer(new ServerIntegrationOptions { Pool = false });
+        await server.WaitIdleAsync();
+        await server.WaitAssertion(() =>
+        {
+            var entities = server.EntMan;
+            var physics = server.System<SharedSpatialPhysicsSystem>();
+            var world = server.System<SharedSpatialSystem>().CreateWorld();
+            physics.EnablePhysics(world, new SpatialPhysicsSettings(Vector3.Zero, 1, 8));
+            var a = SpatialPhysicsTests.SpawnBody(entities, world, Vector3.Zero);
+            var b = SpatialPhysicsTests.SpawnBody(entities, world, Vector3.UnitX * 2);
+            SpatialConstraintTests.SpawnConstraint(entities, world, new SpatialConstraintDefinition(a, b,
+                SpatialConstraintKind.Fixed, relativePose: new RigidTransform3(Vector3.UnitX * 2, Quaternion.Identity)));
+            physics.Update(1f / 30);
+            var path = new ResPath("/spatial-constraints.yml");
+            var loader = server.System<MapLoaderSystem>();
+            Assert.That(loader.TrySaveMap(entities.GetComponent<MapComponent>(world).MapId, path), Is.True);
+            entities.DeleteEntity(world);
+            Assert.That(loader.TryLoadMap(path, out var restored, out _), Is.True);
+            Assert.That(loader.TryLoadMap(path, out var cloned, out _,
+                new DeserializationOptions { RegenerateSpatialWorldIds = true }), Is.True);
+            var participants = new HashSet<EntityUid>();
+            physics.Update(1f / 30);
+            foreach (var map in new[] { restored!.Value.Owner, cloned!.Value.Owner })
+            {
+                using var children = entities.GetComponent<TransformComponent>(map).ChildEnumerator;
+                var count = 0;
+                while (children.MoveNext(out var child))
+                {
+                    if (!entities.TryGetComponent<SpatialConstraintComponent>(child, out var constraint))
+                        continue;
+                    count++;
+                    var d = constraint.Definition;
+                    Assert.That(physics.IsConstraintActive(child), Is.True);
+                    Assert.That(d.BodyA, Is.Not.EqualTo(a));
+                    Assert.That(d.BodyB, Is.Not.EqualTo(b));
+                    Assert.That(entities.GetComponent<TransformComponent>(d.BodyA).MapUid, Is.EqualTo(map));
+                    Assert.That(entities.GetComponent<TransformComponent>(d.BodyB).MapUid, Is.EqualTo(map));
+                    Assert.That(participants.Add(d.BodyA), Is.True);
+                    Assert.That(participants.Add(d.BodyB), Is.True);
+                    Assert.That(d.RelativePose.Position, Is.EqualTo(Vector3.UnitX * 2));
+                }
+                Assert.That(count, Is.EqualTo(1));
+            }
+            Assert.That(participants, Has.Count.EqualTo(4));
+        });
+    }
+
+    [Test]
     public async Task SavedBodiesRestoreDefinitionsVelocitiesAndIndependentBackendSources()
     {
         using var server = StartServer(new ServerIntegrationOptions { Pool = false });
@@ -99,14 +149,22 @@ public sealed class SpatialPhysicsPersistenceTest : RobustIntegrationTest
         EntityUid body = default;
         NetEntity worldNet = default;
         NetEntity bodyNet = default;
+        NetEntity secondBodyNet = default;
+        NetEntity constraintNet = default;
         var settings = new SpatialPhysicsSettings(Vector3.Zero, 1, 8);
         await server.WaitAssertion(() =>
         {
             world = server.System<SharedSpatialSystem>().CreateWorld();
             server.System<SharedSpatialPhysicsSystem>().EnablePhysics(world, settings);
             body = SpatialPhysicsTests.SpawnBody(server.EntMan, world, new Vector3(0, 0, 3), Vector3.UnitX);
+            var second = SpatialPhysicsTests.SpawnBody(server.EntMan, world, new Vector3(0, 2, 3), Vector3.UnitX);
+            var constraint = SpatialConstraintTests.SpawnConstraint(server.EntMan, body,
+                new SpatialConstraintDefinition(body, second, SpatialConstraintKind.Fixed,
+                    relativePose: new RigidTransform3(Vector3.UnitY * 2, Quaternion.Identity)));
             worldNet = server.EntMan.GetNetEntity(world);
             bodyNet = server.EntMan.GetNetEntity(body);
+            secondBodyNet = server.EntMan.GetNetEntity(second);
+            constraintNet = server.EntMan.GetNetEntity(constraint);
         });
         client.SetConnectTarget(server);
         await client.WaitPost(() => client.Resolve<IClientNetManager>().ClientConnect(null!, 0, null!));
@@ -135,6 +193,14 @@ public sealed class SpatialPhysicsPersistenceTest : RobustIntegrationTest
             Assert.That(before.Position.X, Is.GreaterThan(0));
             Assert.Throws<InvalidOperationException>(() => physics.SetVelocity((localBody, component), Vector3.UnitY, Vector3.Zero));
             Assert.Throws<KeyNotFoundException>(() => physics.GetBackend(localWorld));
+            var localConstraint = entities.GetEntity(constraintNet);
+            var constraint = entities.GetComponent<SpatialConstraintComponent>(localConstraint);
+            Assert.That(constraint.HasDefinition, Is.True);
+            Assert.That(constraint.Definition.BodyA, Is.EqualTo(localBody));
+            Assert.That(constraint.Definition.BodyB, Is.EqualTo(entities.GetEntity(secondBodyNet)));
+            Assert.That(constraint.Definition.RelativePose.Position, Is.EqualTo(Vector3.UnitY * 2));
+            Assert.That(physics.IsConstraintActive(localConstraint), Is.False);
+            Assert.Throws<InvalidOperationException>(() => physics.SetConstraint((localConstraint, constraint), constraint.Definition));
             physics.Update(1);
             Assert.That(client.System<SharedTransformSystem>().GetWorldPose(localBody), Is.EqualTo(before));
         });

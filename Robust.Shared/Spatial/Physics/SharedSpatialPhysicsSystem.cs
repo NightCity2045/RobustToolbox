@@ -34,6 +34,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
     public override void Initialize()
     {
         base.Initialize();
+        InitializeConstraints();
         SubscribeLocalEvent<SpatialPhysicsWorldComponent, ComponentStartup>(OnWorldStartup);
         SubscribeLocalEvent<SpatialPhysicsWorldComponent, ComponentShutdown>(OnWorldShutdown);
         SubscribeLocalEvent<SpatialPhysicsWorldComponent, ComponentGetState>(OnWorldGetState);
@@ -58,6 +59,8 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
             world.Dispose();
         _worlds.Clear();
         _bindings.Clear();
+        _constraintBindings.Clear();
+        _constraintComponents.Clear();
         base.Shutdown();
     }
 
@@ -108,6 +111,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
     {
         if (!_net.IsServer || frameTime <= 0)
             return;
+        SyncConstraints();
         foreach (var (world, backend) in _worlds)
         {
             if (MetaData(world).EntityPaused)
@@ -179,7 +183,10 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
     }
 
     private void OnBodyShutdown(EntityUid uid, SpatialBodyComponent component, ComponentShutdown args)
-        => RemoveBinding(uid);
+    {
+        RemoveConstraintsReferencing(uid);
+        RemoveBinding(uid);
+    }
 
     private void OnGeometryStartup(EntityUid uid, SpatialGeometryComponent component, ComponentStartup args)
     {
@@ -189,6 +196,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
 
     private void OnGeometryShutdown(EntityUid uid, SpatialGeometryComponent component, ComponentShutdown args)
     {
+        RemoveConstraintsReferencing(uid);
         if (_bindings.TryGetValue(uid, out var binding) && binding.Geometry)
             RemoveBinding(uid);
     }

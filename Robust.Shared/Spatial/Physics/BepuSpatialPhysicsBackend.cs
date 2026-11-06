@@ -167,6 +167,7 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
     {
         ThrowIfDisposed();
         var entry = _entries[id];
+        RemoveBodyConstraints(id);
         if (entry.Definition.Motion == SpatialBackendMotion.Static)
         {
             _simulation.Statics.Remove(entry.Static);
@@ -214,6 +215,7 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
             body.Velocity = velocity;
             body.UpdateBounds();
         }
+        UpdateConstraintAnchors(entry);
     }
 
     public void Step(float fixedDelta)
@@ -272,6 +274,9 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
             _entries.Clear();
             _bodies.Clear();
             _statics.Clear();
+            _constraints.Clear();
+            _bodyConstraints.Clear();
+            _disabledContactPairs.Clear();
         }
     }
 
@@ -352,6 +357,8 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
         public bool AllowContactGeneration(int worker, CollidableReference a, CollidableReference b, ref float margin)
         {
             if (a.Mobility != CollidableMobility.Dynamic && b.Mobility != CollidableMobility.Dynamic)
+                return false;
+            if (owner._disabledContactPairs.ContainsKey(ContactPair(owner.GetEntry(a).Id, owner.GetEntry(b).Id)))
                 return false;
             var first = owner.GetEntry(a).Definition;
             var second = owner.GetEntry(b).Definition;

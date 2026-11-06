@@ -103,6 +103,9 @@ internal interface ISpatialPhysicsBackend : IDisposable
     void RemoveBody(SpatialBackendBodyId id);
     SpatialBackendState GetState(SpatialBackendBodyId id);
     void SetState(SpatialBackendBodyId id, SpatialBackendState state);
+    void ApplyImpulse(SpatialBackendBodyId id, Vector3 worldImpulse, Vector3 worldPoint);
+    SpatialBackendConstraintId AddConstraint(SpatialBackendConstraintDefinition definition);
+    void RemoveConstraint(SpatialBackendConstraintId id);
     void Step(float fixedDelta);
     SpatialBackendHit? RayCast(Vector3 origin, Vector3 unitDirection, float distance, uint mask,
         SpatialBackendBodyId? ignoredBody = null, Func<SpatialBackendPart, bool>? filter = null);

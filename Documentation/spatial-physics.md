@@ -6,7 +6,7 @@ handles. It accepts neutral body definitions and returns neutral body states and
 source-qualified ray hits. `SharedSpatialPhysicsSystem` connects this backend to
 explicit spatial world profiles and ECS bodies. The ordinary content maps and
 prototypes have not been migrated or enabled by this engine change. Motor,
-constraints, contact events, client collision streaming
+contact events, client collision streaming
 and prediction remain required integration work.
 
 Static, dynamic and kinematic bodies use compound box, sphere and Z-axis capsule
@@ -138,3 +138,39 @@ without its collision baseline cannot use this service to authorize movement.
 Contained bodies remain excluded from the world's active collision scene; content
 uses its container access rules separately. Query results do not grant access to
 items inside a container.
+
+## Impulses and connections
+
+`ApplyImpulse` accepts world-space momentum and an application point for an active,
+unpaused dynamic body. BEPU applies mass and transformed inertia at the center of
+mass; canonical velocities remain measured at the entity origin. Invalid or
+unrepresentable results are rejected before solver mutation. Zero impulse has no
+side effects. `SpatialImpulseApplied` is raised once on the server after component
+velocities are committed; content determines any gameplay consequences.
+`GetVelocityAtWorldPoint` evaluates the canonical linear + angular-cross-offset
+velocity. Paused/contained bodies retain canonical velocities for resumption; this
+utility does not imply that a dormant body is currently moving in the solver.
+
+`SpatialConstraintComponent` stores a neutral, serializable connection between two
+entities. Supported connections are fixed relative pose, a point attachment with
+free angular motion, and a minimum/maximum distance range. Anchors are relative to
+entity origins, with center-of-mass offsets accounted for inside the adapter.
+At least one participant must be dynamic. Spring frequency/damping and whether
+connected participants collide are explicit parameters. Joint-specific gameplay
+rules, including seat belts and pulling permissions, remain in content.
+
+Static participants use private shapeless kinematic anchors because BEPU joints
+connect body handles. These anchors are derived solver data, follow static pose
+changes, can sleep, and are removed with the connection. Multiple connections
+reference-count collision suppression; deleting the last one restores contacts
+and wakes the affected islands. Stale constraint IDs cannot alias new links.
+
+Initial constraints are bound at the fixed tick boundary after participant
+startup. Runtime replacement prepares its new connection before replacing the
+canonical definition. Inactive/container participants, paused connection entities,
+and partial world transfers suspend the solver connection. Moving the whole
+subgraph to another physical world rebuilds it there. Deleting a body removes
+referencing constraint components without deleting the content-owned link entity.
+Map save/restore/clone remaps both participants; no backend handle is serialized.
+Network states use NetEntity references and initialize client definitions without
+starting a second authoritative solver. Client prediction remains pending.
