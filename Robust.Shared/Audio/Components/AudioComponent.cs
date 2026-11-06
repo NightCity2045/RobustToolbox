@@ -191,6 +191,14 @@ public sealed partial class AudioComponent : Component, IAudioSource
         set => Source.Position = value;
     }
 
+    /// <inheritdoc />
+    [ViewVariables, Access(Other = AccessPermissions.ReadWriteExecute)]
+    public Vector3 Position3
+    {
+        get => Source.Position3;
+        set => Source.Position3 = value;
+    }
+
     /// <summary>
     /// <see cref="IAudioSource.Volume"/>
     /// </summary>
@@ -247,6 +255,14 @@ public sealed partial class AudioComponent : Component, IAudioSource
     {
         get => Source.Velocity;
         set => Source.Velocity = value;
+    }
+
+    /// <inheritdoc />
+    [ViewVariables, Access(Other = AccessPermissions.ReadWriteExecute)]
+    public Vector3 Velocity3
+    {
+        get => Source.Velocity3;
+        set => Source.Velocity3 = value;
     }
 
     void IAudioSource.SetAuxiliary(IAuxiliaryAudio? audio)

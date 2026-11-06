@@ -142,25 +142,31 @@ public abstract class BaseAudioSource : IAudioSource
     /// <inheritdoc />
     public virtual Vector2 Position
     {
+        get { var p = Position3; return new Vector2(p.X, p.Y); }
+        set
+        {
+            _checkDisposed();
+            if (!AreFinite(value.X, value.Y)) return;
+            Position3 = new Vector3(value, Position3.Z);
+        }
+    }
+
+    /// <inheritdoc />
+    public virtual Vector3 Position3
+    {
         get
         {
             _checkDisposed();
-            AL.GetSource(SourceHandle, ALSource3f.Position, out var x, out var y, out _);
+            AL.GetSource(SourceHandle, ALSource3f.Position, out var x, out var y, out var z);
             Master._checkAlError();
-            return new Vector2(x, y);
+            return new Vector3(x, y, z);
         }
         set
         {
             _checkDisposed();
 
-            var (x, y) = value;
-
-            if (!AreFinite(x, y))
-            {
-                return;
-            }
-
-            AL.Source(SourceHandle, ALSource3f.Position, x, y, 0);
+            RequireFinite(value);
+            AL.Source(SourceHandle, ALSource3f.Position, value.X, value.Y, value.Z);
             Master._checkAlError();
         }
     }
@@ -329,26 +335,32 @@ public abstract class BaseAudioSource : IAudioSource
     /// <inheritdoc />
     public Vector2 Velocity
     {
+        get { var v = Velocity3; return new Vector2(v.X, v.Y); }
+        set
+        {
+            _checkDisposed();
+            if (!AreFinite(value.X, value.Y)) return;
+            Velocity3 = new Vector3(value, Velocity3.Z);
+        }
+    }
+
+    /// <inheritdoc />
+    public Vector3 Velocity3
+    {
         get
         {
             _checkDisposed();
 
-            AL.GetSource(SourceHandle, ALSource3f.Velocity, out var x, out var y, out _);
+            AL.GetSource(SourceHandle, ALSource3f.Velocity, out var x, out var y, out var z);
             Master._checkAlError();
-            return new Vector2(x, y);
+            return new Vector3(x, y, z);
         }
         set
         {
             _checkDisposed();
 
-            var (x, y) = value;
-
-            if (!AreFinite(x, y))
-            {
-                return;
-            }
-
-            AL.Source(SourceHandle, ALSource3f.Velocity, x, y, 0);
+            RequireFinite(value);
+            AL.Source(SourceHandle, ALSource3f.Velocity, value.X, value.Y, value.Z);
             Master._checkAlError();
         }
     }
@@ -392,6 +404,12 @@ public abstract class BaseAudioSource : IAudioSource
         }
 
         return false;
+    }
+
+    protected static void RequireFinite(Vector3 value)
+    {
+        if (!float.IsFinite(value.X) || !float.IsFinite(value.Y) || !float.IsFinite(value.Z))
+            throw new ArgumentOutOfRangeException(nameof(value), "Audio coordinates and velocities must be finite.");
     }
 
     ~BaseAudioSource()

@@ -45,6 +45,10 @@ jobs:
         run: dotnet build -m:2
       - name: Run complete engine tests
         run: dotnet test --no-build --no-restore --logger trx --results-directory release/qualification -- NUnit.ConsoleOut=0
+      - name: Qualify XYZ audio through native OpenAL
+        env:
+          ALSOFT_DRIVERS: "null"
+        run: dotnet test Robust.Client.IntegrationTests/Robust.Client.IntegrationTests.csproj --no-build --no-restore --filter FullyQualifiedName~SpatialAudioSourceTest --logger "trx;LogFileName=spatial-audio-native.trx" --results-directory release/qualification -- NUnit.ExplicitMode=Relaxed NUnit.ConsoleOut=0
       - name: Verify full-release headless resource loading
         run: dotnet test Robust.Client.IntegrationTests/Robust.Client.IntegrationTests.csproj -c Release -p:FullRelease=true -m:2 --filter FullyQualifiedName~HeadlessPreloadTest --logger "trx;LogFileName=headless-full-release.trx" --results-directory release/qualification
       - name: Package standalone engine after tests

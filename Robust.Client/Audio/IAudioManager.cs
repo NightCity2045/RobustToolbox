@@ -25,6 +25,13 @@ public interface IAudioManager
 
     IAudioSource? CreateAudioSource(AudioStream stream);
 
+    /// <summary>
+    /// Set a complete XYZ listener pose and Doppler velocity. Uses the physical
+    /// height exactly; the legacy top-down listener offset is not applied.
+    /// The active view/audio adapter owns when this input is updated.
+    /// </summary>
+    void SetSpatialListener(SpatialAudioListener listener);
+
     AudioStream LoadAudioOggVorbis(Stream stream, string? name = null);
 
     AudioStream LoadAudioWav(Stream stream, string? name = null);

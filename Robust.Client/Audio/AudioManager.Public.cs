@@ -78,6 +78,20 @@ internal partial class AudioManager
         AL.Listener(ALListener3f.Position, position.X, position.Y, _zOffset);
     }
 
+    public void SetSpatialListener(SpatialAudioListener listener)
+    {
+        listener.Validate();
+        var position = listener.Pose.Position;
+        var velocity = listener.Velocity;
+        var forward = listener.Forward; var up = listener.Up;
+        AL.Listener(ALListener3f.Position, position.X, position.Y, position.Z);
+        AL.Listener(ALListener3f.Velocity, velocity.X, velocity.Y, velocity.Z);
+        var atVector = new OpenTK.Mathematics.Vector3(forward.X, forward.Y, forward.Z);
+        var upVector = new OpenTK.Mathematics.Vector3(up.X, up.Y, up.Z);
+        AL.Listener(ALListenerfv.Orientation, ref atVector, ref upVector);
+        _checkAlError();
+    }
+
     /// <inheritdoc/>
     public void SetRotation(Angle angle)
     {

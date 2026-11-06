@@ -1,3 +1,4 @@
+using System;
 using System.Numerics;
 using Robust.Shared.Audio.Effects;
 using Robust.Shared.Serialization.Manager.Attributes;
@@ -49,7 +50,13 @@ internal partial class DummyAudioSource : IAudioSource
     public bool Global { get; set; }
 
     /// <inheritdoc />
-    public Vector2 Position { get; set; }
+    public Vector2 Position
+    {
+        get => new(Position3.X, Position3.Y);
+        set { if (float.IsFinite(value.X) && float.IsFinite(value.Y)) Position3 = new Vector3(value, Position3.Z); }
+    }
+    private Vector3 _position3;
+    public Vector3 Position3 { get => _position3; set { RequireFinite(value); _position3 = value; } }
 
     /// <inheritdoc />
     [DataField]
@@ -80,7 +87,19 @@ internal partial class DummyAudioSource : IAudioSource
     public float PlaybackPosition { get; set; }
 
     /// <inheritdoc />
-    public Vector2 Velocity { get; set; }
+    public Vector2 Velocity
+    {
+        get => new(Velocity3.X, Velocity3.Y);
+        set { if (float.IsFinite(value.X) && float.IsFinite(value.Y)) Velocity3 = new Vector3(value, Velocity3.Z); }
+    }
+    private Vector3 _velocity3;
+    public Vector3 Velocity3 { get => _velocity3; set { RequireFinite(value); _velocity3 = value; } }
+
+    private static void RequireFinite(Vector3 value)
+    {
+        if (!float.IsFinite(value.X) || !float.IsFinite(value.Y) || !float.IsFinite(value.Z))
+            throw new ArgumentOutOfRangeException(nameof(value));
+    }
 
     public void SetAuxiliary(IAuxiliaryAudio? audio)
     {

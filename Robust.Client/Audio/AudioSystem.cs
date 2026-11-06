@@ -65,6 +65,16 @@ public sealed partial class AudioSystem : SharedAudioSystem
     public event Func<MapCoordinates, Vector2, float, EntityUid?, float>? GetOcclusionOverride;
 
     /// <summary>
+    /// Active view adapter supplies a current XYZ listener on each audio update.
+    /// Null returns to the ordinary flat Eye. The adapter also supplies its sound
+    /// propagation policy through ProcessStreamOverride; this selects no listeners
+    /// or recipients and does not reinterpret the existing planar occlusion model.
+    /// </summary>
+    public Func<SpatialAudioListener?>? SpatialListenerProvider { get; set; }
+
+    public SpatialAudioListener? CurrentSpatialListener { get; private set; }
+
+    /// <summary>
     /// Per-tick cache of relevant streams.
     /// </summary>
     private readonly List<(EntityUid Entity, AudioComponent Component, TransformComponent Xform)> _streams = new();
@@ -320,18 +330,20 @@ public sealed partial class AudioSystem : SharedAudioSystem
 
         // Clamp to 0 in case we have a really long frame.
         _audioFrameTimeRemaining = MathF.Max(0f, _audioFrameTime + _audioFrameTimeRemaining);
-        var eye = _eyeManager.CurrentEye;
-        var localEntity = _playerManager.LocalEntity;
-        Vector2 listenerVelocity;
-
-        if (localEntity != null)
-            listenerVelocity = _physics.GetMapLinearVelocity(localEntity.Value);
+        var suppliedListener = SpatialListenerProvider?.Invoke();
+        suppliedListener?.Validate();
+        CurrentSpatialListener = suppliedListener;
+        if (CurrentSpatialListener is { } spatialListener)
+            _audio.SetSpatialListener(spatialListener);
         else
-            listenerVelocity = Vector2.Zero;
-
-        _audio.SetVelocity(listenerVelocity);
-        _audio.SetRotation(eye.Rotation);
-        _audio.SetPosition(eye.Position.Position);
+        {
+            var eye = _eyeManager.CurrentEye;
+            var localEntity = _playerManager.LocalEntity;
+            var listenerVelocity = localEntity != null ? _physics.GetMapLinearVelocity(localEntity.Value) : Vector2.Zero;
+            _audio.SetVelocity(listenerVelocity);
+            _audio.SetRotation(eye.Rotation);
+            _audio.SetPosition(eye.Position.Position);
+        }
 
         var ourPos = GetListenerCoordinates();
 
@@ -447,7 +459,7 @@ public sealed partial class AudioSystem : SharedAudioSystem
         }
 
         // Update audio positions.
-        component.Position = worldPos;
+        component.Position3 = new Vector3(worldPos, 0);
 
         // Make race cars go NYYEEOOOOOMMMMM
         if (_physicsQuery.TryGetComponent(parentUid, out var physicsComp))
@@ -455,8 +467,9 @@ public sealed partial class AudioSystem : SharedAudioSystem
             // This actually gets the tracked entity's xform & iterates up though the parents for the second time. Bit
             // inefficient.
             var velocity = _physics.GetMapLinearVelocity(parentUid, physicsComp);
-            component.Velocity = velocity;
+            component.Velocity3 = new Vector3(velocity, 0);
         }
+        else component.Velocity3 = Vector3.Zero;
     }
 
     /// <summary>

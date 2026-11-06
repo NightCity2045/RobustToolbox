@@ -24,25 +24,20 @@ internal sealed class AudioSource : BaseAudioSource
     }
 
     /// <inheritdoc />
-    public override Vector2 Position
+    public override Vector3 Position3
     {
         get
         {
             _checkDisposed();
-            AL.GetSource(SourceHandle, ALSource3f.Position, out var x, out var y, out _);
+            AL.GetSource(SourceHandle, ALSource3f.Position, out var x, out var y, out var z);
             Master._checkAlError();
-            return new Vector2(x, y);
+            return new Vector3(x, y, z);
         }
         set
         {
             _checkDisposed();
 
-            var (x, y) = value;
-
-            if (!AreFinite(x, y))
-            {
-                return;
-            }
+            RequireFinite(value);
 #if DEBUG
             // OpenAL doesn't seem to want to play stereo positionally.
             // Log a warning if people try to.
@@ -56,7 +51,7 @@ internal sealed class AudioSource : BaseAudioSource
             }
 #endif
 
-            AL.Source(SourceHandle, ALSource3f.Position, x, y, 0);
+            AL.Source(SourceHandle, ALSource3f.Position, value.X, value.Y, value.Z);
             Master._checkAlError();
         }
     }
@@ -68,9 +63,12 @@ internal sealed class AudioSource : BaseAudioSource
 
     protected override void Dispose(bool disposing)
     {
-        if (!disposing)
+        if (SourceHandle == -1)
+            return;
+
+        if (!disposing || !Master.IsMainThread())
         {
-            // We can't run this code inside the finalizer thread so tell Clyde to clear it up later.
+            // Match buffered sources: defer native disposal off the audio thread.
             Master.DeleteSourceOnMainThread(SourceHandle, FilterHandle);
         }
         else

@@ -79,6 +79,7 @@ cover direction, steep views, pivot/physical size, folded timing, moving decals 
 holes, signature sharing, pinned budgets and resource invalidation. These are
 engine fixtures. They do not establish content asset coverage or gameplay readiness.
 
-E06 remains open for spatial particles, screen effects and XYZ audio; E05/B03 view
+E06 remains open for spatial particles and screen effects; [XYZ audio](spatial-audio.md)
+provides the low-level source/listener mechanism. E05/B03 view
 and gameplay integration, B01 complete resource coverage and hardware performance
 acceptance remain required by the plans.

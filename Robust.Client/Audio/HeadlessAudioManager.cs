@@ -41,8 +41,10 @@ internal sealed class HeadlessAudioManager : IAudioInternal
     /// <inheritdoc />
     public IAudioSource CreateAudioSource(AudioStream stream)
     {
-        return DummyAudioSource.Instance;
+        return new DummyAudioSource();
     }
+
+    public void SetSpatialListener(SpatialAudioListener listener) => listener.Validate();
 
     public IReadOnlyList<string> GetAudioDevices()
     {
@@ -57,7 +59,7 @@ internal sealed class HeadlessAudioManager : IAudioInternal
     /// <inheritdoc />
     public IBufferedAudioSource? CreateBufferedAudioSource(int buffers, bool floatAudio = false)
     {
-        return DummyBufferedAudioSource.Instance;
+        return new DummyBufferedAudioSource();
     }
 
     /// <inheritdoc />

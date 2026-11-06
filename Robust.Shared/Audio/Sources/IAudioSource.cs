@@ -49,6 +49,9 @@ public interface IAudioSource : IDisposable
     /// </summary>
     Vector2 Position { get; set; }
 
+    /// <summary>XYZ position in metres, world-relative unless Global is true. The XY compatibility setter preserves height.</summary>
+    Vector3 Position3 { get; set; }
+
     float Pitch { get; set; }
 
     /// <summary>
@@ -78,6 +81,9 @@ public interface IAudioSource : IDisposable
     /// Audio source velocity. Used for the doppler effect.
     /// </summary>
     Vector2 Velocity { get; set; }
+
+    /// <summary>XYZ velocity in metres/second for Doppler. The XY compatibility setter preserves vertical velocity.</summary>
+    Vector3 Velocity3 { get; set; }
 
     /// <summary>
     /// Set the auxiliary sendfilter for this audio source.
