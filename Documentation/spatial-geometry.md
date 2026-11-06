@@ -38,8 +38,17 @@ Both forms produce frame-local `SpatialSolidPart` boxes with semantic surface,
 source entity, material and revision references. This CPU representation is usable
 without a GPU or Content dependency. Real BEPU ray/sphere-sweep qualification tests
 consume these same boxes, including a rotated frame, a window, slab top/underside
-and a clear shaft. This is not yet an ECS physics backend or render mesh builder;
-corner unions and internal-face removal remain work for geometry consumers.
+and a clear shaft. These tests are not yet an ECS physics backend.
+
+`SpatialSurfaceBuilder` builds the union exterior as rectangular patches with
+outward triangle winding and semantic source references. It removes internal faces
+at corners and T junctions, resolves coincident outward faces by surface identity,
+and retains reveals inside windows and shafts. A balanced temporary volume index
+prunes unrelated solids without allocating empty world cells. Geometry jobs consume
+only detached snapshots; patches own no GPU resources. Tests check exact surface
+areas, normal/winding, missing internal faces, non-overlapping coplanar patches,
+2048 separated solids on eight layers, and volume-index results against brute force.
+Actual renderer upload, chunk invalidation and resource lifecycle remain E04/E05.
 
 `SharedGeometrySystem.ConfigureInitialGeometry` validates a whole candidate before
 replacing initial canonical data. It rejects duplicate edges, duplicate surface
@@ -55,6 +64,6 @@ or backend indices. Integration tests save, restore and explicitly clone a world
 check entity/surface remapping, and reject malformed geometry. Geometry is not
 replicated as an unbounded ordinary component state: chunk streaming remains E07.
 
-E02/G2 remains open. Complete corner/mesh topology, runtime
-transactions and the query, physics, graph and renderer integrations still need
+E02/G2 remains open. Runtime transactions and the query, physics, graph and
+renderer integrations still need
 to be completed and qualified together with Content.
