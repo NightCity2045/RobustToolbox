@@ -95,6 +95,7 @@ public sealed class SpatialPhysicsPersistenceTest : RobustIntegrationTest
             var component = entities.AddComponent<SpatialBodyComponent>(body);
             physics.ConfigureInitialBody((body, component), definition, velocity, angular);
             entities.InitializeAndStartEntity(body, entities.GetComponent<MapComponent>(world).MapId);
+            physics.ReconfigureBody((body, component), definition, 0, velocity, angular);
             var path = new ResPath("/spatial-physical-world.yml");
             var loader = server.System<MapLoaderSystem>();
             Assert.That(loader.TrySaveMap(entities.GetComponent<MapComponent>(world).MapId, path), Is.True);
@@ -119,21 +120,24 @@ public sealed class SpatialPhysicsPersistenceTest : RobustIntegrationTest
                 Assert.That(children.MoveNext(out _), Is.False);
                 var loadedBody = entities.GetComponent<SpatialBodyComponent>(loaded);
                 AssertDefinition(loadedBody.Definition, definition);
+                Assert.That(loadedBody.DefinitionRevision, Is.EqualTo(1));
                 Assert.That(loadedBody.LinearVelocity, Is.EqualTo(velocity));
                 Assert.That(loadedBody.AngularVelocity, Is.EqualTo(angular));
                 Assert.That(server.System<SharedTransformSystem>().GetWorldPose(loaded), Is.EqualTo(pose));
                 Assert.That(physics.GetBodyCount(map), Is.EqualTo(1));
                 var hit = physics.GetBackend(map).RayCast(pose.Position + new Vector3(0, 0, 2), -Vector3.UnitZ, 4, 4)!.Value;
                 Assert.That(hit.Source.Entity, Is.EqualTo(loaded));
+                Assert.That(hit.Source.Revision, Is.EqualTo(1));
                 sources.Add(hit.Source.Entity!.Value);
             }
             Assert.That(sources, Has.Count.EqualTo(2));
             using var stream = new MemoryStream();
             var serializer = server.Resolve<IRobustSerializer>();
-            serializer.Serialize(stream, new SpatialBodyComponentState(definition, velocity, angular));
+            serializer.Serialize(stream, new SpatialBodyComponentState(definition, velocity, angular, 7));
             stream.Position = 0;
             var state = serializer.Deserialize<SpatialBodyComponentState>(stream);
             AssertDefinition(state.Definition, definition);
+            Assert.That(state.DefinitionRevision, Is.EqualTo(7));
             Assert.That(state.LinearVelocity, Is.EqualTo(velocity));
             Assert.That(state.AngularVelocity, Is.EqualTo(angular));
         });
@@ -157,6 +161,9 @@ public sealed class SpatialPhysicsPersistenceTest : RobustIntegrationTest
             world = server.System<SharedSpatialSystem>().CreateWorld();
             server.System<SharedSpatialPhysicsSystem>().EnablePhysics(world, settings);
             body = SpatialPhysicsTests.SpawnBody(server.EntMan, world, new Vector3(0, 0, 3), Vector3.UnitX);
+            var component = server.EntMan.GetComponent<SpatialBodyComponent>(body);
+            server.System<SharedSpatialPhysicsSystem>().ReconfigureBody((body, component), component.Definition,
+                0, Vector3.UnitX, Vector3.Zero);
             var second = SpatialPhysicsTests.SpawnBody(server.EntMan, world, new Vector3(0, 2, 3), Vector3.UnitX);
             var constraint = SpatialConstraintTests.SpawnConstraint(server.EntMan, body,
                 new SpatialConstraintDefinition(body, second, SpatialConstraintKind.Fixed,
@@ -185,6 +192,7 @@ public sealed class SpatialPhysicsPersistenceTest : RobustIntegrationTest
             var physics = client.System<SharedSpatialPhysicsSystem>();
             var component = entities.GetComponent<SpatialBodyComponent>(localBody);
             Assert.That(component.HasDefinition, Is.True);
+            Assert.That(component.DefinitionRevision, Is.EqualTo(1));
             Assert.That(entities.GetComponent<SpatialPhysicsWorldComponent>(localWorld).Settings, Is.EqualTo(settings));
             Assert.That(component.Definition.Colliders.Single().Shape, Is.TypeOf<SpatialSphereShape>());
             Assert.That(component.LinearVelocity, Is.EqualTo(Vector3.UnitX));
@@ -192,6 +200,8 @@ public sealed class SpatialPhysicsPersistenceTest : RobustIntegrationTest
             Assert.That(before.Position.Z, Is.EqualTo(3));
             Assert.That(before.Position.X, Is.GreaterThan(0));
             Assert.Throws<InvalidOperationException>(() => physics.SetVelocity((localBody, component), Vector3.UnitY, Vector3.Zero));
+            Assert.Throws<InvalidOperationException>(() => physics.ReconfigureBody((localBody, component),
+                component.Definition, 1, Vector3.UnitY, Vector3.Zero));
             Assert.Throws<KeyNotFoundException>(() => physics.GetBackend(localWorld));
             var localConstraint = entities.GetEntity(constraintNet);
             var constraint = entities.GetComponent<SpatialConstraintComponent>(localConstraint);

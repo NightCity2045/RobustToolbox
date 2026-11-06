@@ -29,7 +29,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
     private bool _committing;
 
     private sealed record Binding(EntityUid Entity, EntityUid World, SpatialBackendBodyId Body,
-        bool Geometry, ulong GeometryRevision, bool Paused);
+        bool Geometry, ulong GeometryRevision, bool Paused, ulong DefinitionRevision);
 
     public override void Initialize()
     {
@@ -299,12 +299,13 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
         var linear = hasBody ? body!._linearVelocity : Vector3.Zero;
         var angular = hasBody ? body!._angularVelocity : Vector3.Zero;
         ValidateDefinition(uid, definition, linear, angular);
-        if (hasGeometry && !definition.UseGeometry)
-            throw new InvalidOperationException("A frame with canonical geometry must use that geometry for its body.");
+        ValidateGeometryOwnership(uid, definition);
+        var definitionRevision = hasBody ? body!._definitionRevision : 0;
         var paused = hasBody && MetaData(uid).EntityPaused;
         var state = new SpatialBackendState(_transforms.GetWorldPose(uid), paused ? Vector3.Zero : linear,
             paused ? Vector3.Zero : angular);
-        if (_bindings.TryGetValue(uid, out var existing) && existing.World == map)
+        if (_bindings.TryGetValue(uid, out var existing) && existing.World == map && existing.DefinitionRevision == definitionRevision
+            && (!hasGeometry || existing.GeometryRevision == Comp<SpatialGeometryComponent>(uid).Revision))
         {
             if (existing.Paused != paused)
             {
@@ -318,18 +319,39 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
             return;
         }
 
-        var parts = new List<SpatialBackendPart>();
+        var backendDefinition = BuildBackendDefinition(uid, definition, definitionRevision, out var revision);
+        if (backendDefinition == null)
+        {
+            RemoveBinding(uid);
+            return;
+        }
+        var id = backend.AddBody(backendDefinition, state);
+        if (paused && definition.Owner == SpatialMotionOwner.DynamicBody)
+            backend.SetPaused(id, true);
+        RemoveBinding(uid);
+        _bindings.Add(uid, new Binding(uid, map.Value, id, definition.UseGeometry, revision, paused, definitionRevision));
+    }
+
+    private void ValidateGeometryOwnership(EntityUid uid, SpatialBodyDefinition definition)
+    {
+        if (HasComp<SpatialGeometryComponent>(uid) && !definition.UseGeometry)
+            throw new InvalidOperationException("A frame with canonical geometry must use that geometry for its body.");
         SpatialPhysicsOwnership.ValidateReparent(EntityManager, uid, Transform(uid).ParentUid);
-        ulong revision = 0;
+        if (definition.Owner == SpatialMotionOwner.Static)
+        {
+            for (var ancestor = Transform(uid).ParentUid; ancestor.IsValid(); ancestor = Transform(ancestor).ParentUid)
+                if (HasComp<SpatialBodyComponent>(ancestor))
+                    throw new InvalidOperationException("Structural geometry under another physical body requires compound ownership.");
+        }
+    }
+
+    private SpatialBackendBodyDefinition? BuildBackendDefinition(EntityUid uid, SpatialBodyDefinition definition,
+        ulong definitionRevision, out ulong revision)
+    {
+        var parts = new List<SpatialBackendPart>();
+        revision = 0;
         if (definition.UseGeometry)
         {
-            // A moving structure's geometry belongs to its own compound frame.
-            // Nested structural aggregation is handled by the frame/constraint path.
-            for (var ancestor = Transform(uid).ParentUid; ancestor.IsValid(); ancestor = Transform(ancestor).ParentUid)
-            {
-                if (definition.Owner == SpatialMotionOwner.Static && HasComp<SpatialBodyComponent>(ancestor))
-                    throw new InvalidOperationException("Structural geometry under another physical body requires compound ownership.");
-            }
             var snapshot = _geometry.CaptureSnapshot(uid);
             revision = snapshot.Revision;
             var volume = snapshot.SolidParts.Sum(s => s.Bounds.Volume);
@@ -342,23 +364,17 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
         {
             foreach (var collider in definition.Colliders)
                 parts.Add(new SpatialBackendPart(collider.Shape.ToBackend(), collider.LocalPose, uid,
-                    MassWeight: collider.MassWeight));
+                    Revision: definitionRevision, MassWeight: collider.MassWeight));
         }
         if (parts.Count == 0)
         {
             if (definition.Owner != SpatialMotionOwner.Static)
                 throw new InvalidOperationException("A dynamic body requires nonempty solid geometry.");
-            RemoveBinding(uid);
-            return;
+            return null;
         }
-        var backendDefinition = new SpatialBackendBodyDefinition(
+        return new SpatialBackendBodyDefinition(
             definition.Owner == SpatialMotionOwner.Static ? SpatialBackendMotion.Static : SpatialBackendMotion.Dynamic,
             parts, definition.Mass, definition.Material.ToBackend(), definition.CollisionLayer, definition.CollisionMask);
-        var id = backend.AddBody(backendDefinition, state);
-        if (paused && definition.Owner == SpatialMotionOwner.DynamicBody)
-            backend.SetPaused(id, true);
-        RemoveBinding(uid);
-        _bindings.Add(uid, new Binding(uid, map.Value, id, definition.UseGeometry, revision, paused));
     }
 
     private void RemoveBinding(EntityUid uid)
@@ -411,7 +427,8 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
     }
 
     private void OnBodyGetState(EntityUid uid, SpatialBodyComponent component, ref ComponentGetState args)
-        => args.State = new SpatialBodyComponentState(component._definition.Copy(), component._linearVelocity, component._angularVelocity);
+        => args.State = new SpatialBodyComponentState(component._definition.Copy(), component._linearVelocity, component._angularVelocity,
+            component._definitionRevision);
 
     private void OnBodyHandleState(EntityUid uid, SpatialBodyComponent component, ref ComponentHandleState args)
     {
@@ -424,5 +441,6 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
         component._definition = copy;
         component._linearVelocity = state.LinearVelocity;
         component._angularVelocity = state.AngularVelocity;
+        component._definitionRevision = state.DefinitionRevision;
     }
 }

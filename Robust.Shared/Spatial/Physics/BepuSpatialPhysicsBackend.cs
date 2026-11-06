@@ -28,7 +28,7 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
     private ulong _nextId;
     private bool _disposed;
 
-    private sealed class Entry
+    internal sealed class Entry
     {
         public required SpatialBackendBodyId Id;
         public required SpatialBackendBodyDefinition Definition;
@@ -63,7 +63,14 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(definition);
         ValidateState(state, definition.Motion);
-        var id = new SpatialBackendBodyId(checked(++_nextId));
+        using var prepared = PrepareBody(definition);
+        return prepared.Commit(state);
+    }
+
+    internal PreparedBody PrepareBody(SpatialBackendBodyDefinition definition)
+    {
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(definition);
         var builder = new CompoundBuilder(_pool, _simulation.Shapes, definition.Parts.Count);
         var allocated = new List<TypedIndex>();
         TypedIndex compound = default;
@@ -109,30 +116,12 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
             // their original indices and source identities through ray traversal.
             compound = _simulation.Shapes.Add(new BigCompound(children, _simulation.Shapes, _pool));
             children = default; // The compound owns this buffer now.
-            var entry = new Entry { Id = id, Definition = definition, Shape = compound, Center = center, DynamicInertia = inertia };
+            var entry = new Entry { Id = default, Definition = definition, Shape = compound, Center = center, DynamicInertia = inertia };
             _simulation.Shapes.UpdateBounds(new RigidPose(Vector3.Zero), ref compound, out var localBounds);
             entry.Radius = Vector3.Max(Vector3.Abs(localBounds.Min), Vector3.Abs(localBounds.Max)).Length();
             if (!float.IsFinite(entry.Radius))
                 throw new ArgumentException("Compound radius exceeds the finite solver range.");
-            var pose = ToSolverPose(state.Pose, center);
-            var velocity = ToSolverVelocity(state, center);
-            ValidateSolverState(pose, velocity);
-            if (definition.Motion == SpatialBackendMotion.Static)
-            {
-                entry.Static = _simulation.Statics.Add(new StaticDescription(pose, compound));
-                _statics.Add(entry.Static.Value, entry);
-            }
-            else
-            {
-                var collidable = new CollidableDescription(compound, 1f, ContinuousDetection.Continuous(1e-6f, 1e-6f));
-                var description = definition.Motion == SpatialBackendMotion.Dynamic
-                    ? BodyDescription.CreateDynamic(pose, velocity, inertia, collidable, 0.01f)
-                    : BodyDescription.CreateKinematic(pose, velocity, collidable, 0.01f);
-                entry.Body = _simulation.Bodies.Add(description);
-                _bodies.Add(entry.Body.Value, entry);
-            }
-            _entries.Add(id, entry);
-            return id;
+            return new PreparedBody(this, entry);
         }
         catch
         {

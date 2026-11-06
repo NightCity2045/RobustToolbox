@@ -216,3 +216,22 @@ flushes. The existing sweep InitialOverlap result remains explicitly witness-fre
 callers request a manifold when they need penetration information. A manifold
 normal is a solver-selected separating direction, not a claim of a unique witness
 for completely overlapping shapes.
+
+## Runtime body definitions
+
+`ReconfigureBody` replaces a physical definition using an expected
+`DefinitionRevision` and explicitly supplied canonical linear/angular velocities.
+It validates ownership, connected participants, shapes, mass/inertia and converted
+center-of-mass velocities before removing the old body or changing component data.
+Prepared shapes live outside broadphase: validation of a contained body cannot
+wake neighbors or emit contacts. A failed preparation preserves the old definition,
+revision, velocities and solver body. Prepared resources are consumed once or
+released without entering the simulation.
+
+A successful replacement advances the serialized/networked definition revision;
+explicit collider queries carry that revision. Connections retain their canonical
+references and rebuild at the next fixed boundary. Container dormancy and pause
+remain in force. An ownership change cannot leave a connection without a dynamic
+participant. Map save/restore/clone and connected-client tests cover the revision.
+The caller supplies momentum policy and checks placement/permission; this operation
+alone is not a motor clearance check or a geometry transaction.
