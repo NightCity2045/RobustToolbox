@@ -55,6 +55,8 @@ These APIs do not themselves implement the prediction barrier or client physics.
 Authoritative transform presentation is captured separately at the completed
 normal state boundary; see [spatial-interpolation.md](spatial-interpolation.md).
 Its readiness never substitutes for geometry coverage.
+For read-only client collision consumption after coherent state application, see
+[spatial-client-collision.md](spatial-client-collision.md).
 
 Network registration belongs to the persistent entity manager. Message callbacks
 look up the current streaming system, whose lifetime ends on client disconnect.
