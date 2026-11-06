@@ -39,6 +39,9 @@ public readonly struct RigidTransform3 : IEquatable<RigidTransform3>
                 (rotation.Y < 0 || rotation.Y == 0 && rotation.Z < 0)))
             rotation = -rotation;
 
+        // Negative zero must not give equivalent orientations different serialized bytes.
+        rotation = new Quaternion(rotation.X == 0 ? 0 : rotation.X, rotation.Y == 0 ? 0 : rotation.Y,
+            rotation.Z == 0 ? 0 : rotation.Z, rotation.W == 0 ? 0 : rotation.W);
         Position = position;
         Rotation = rotation;
     }
