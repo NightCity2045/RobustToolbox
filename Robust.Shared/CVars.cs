@@ -287,6 +287,14 @@ namespace Robust.Shared
         public static readonly CVarDef<float> NetMaxUpdateRange =
             CVarDef.Create("net.pvs_range", 25f, CVar.ARCHIVE | CVar.REPLICATED | CVar.SERVER);
 
+        /// <summary>Time horizon for bounded XYZ interest preloading along a viewer's current motion.</summary>
+        public static readonly CVarDef<float> NetSpatialPreloadSeconds =
+            CVarDef.Create("net.spatial_preload_seconds", 0.5f, CVar.ARCHIVE | CVar.SERVERONLY);
+
+        /// <summary>Maximum distance added to spatial interest by velocity preloading.</summary>
+        public static readonly CVarDef<float> NetSpatialPreloadDistance =
+            CVarDef.Create("net.spatial_preload_distance", 64f, CVar.ARCHIVE | CVar.SERVERONLY);
+
         /// <summary>
         /// A variant of <see cref="NetMaxUpdateRange"/> that is used to limit the view-distance of entities with the
         /// <see cref="MetaDataFlags.PvsPriority"/> flag set. This can be used to extend the range at which certain

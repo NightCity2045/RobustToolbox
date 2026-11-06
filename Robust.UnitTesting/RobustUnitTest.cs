@@ -62,7 +62,12 @@ namespace Robust.UnitTesting
                 typeof(LightTreeComponent),
                 typeof(CollisionWakeComponent),
                 typeof(CollideOnAnchorComponent),
-                typeof(ActorComponent)
+                typeof(ActorComponent),
+                typeof(Robust.Shared.Spatial.SpatialWorldComponent),
+                typeof(Robust.Shared.Spatial.SpatialFrameComponent),
+                typeof(Robust.Shared.Spatial.SpatialGeometryComponent),
+                typeof(Robust.Shared.Spatial.Physics.SpatialBodyComponent),
+                typeof(Robust.Shared.Spatial.Physics.SpatialMotorComponent)
             };
 
         public virtual UnitTestProject Project => UnitTestProject.Server;
@@ -146,6 +151,9 @@ namespace Robust.UnitTesting
             {
                 systems.LoadExtraSystemType<ServerMetaDataSystem>();
                 systems.LoadExtraSystemType<PvsSystem>();
+                systems.LoadExtraSystemType<Robust.Server.Spatial.SpatialInterestSystem>();
+                systems.LoadExtraSystemType<Robust.Shared.Spatial.SharedSpatialSystem>();
+                systems.LoadExtraSystemType<Robust.Shared.Spatial.SharedGeometrySystem>();
                 systems.LoadExtraSystemType<Robust.Server.Containers.ContainerSystem>();
                 systems.LoadExtraSystemType<Robust.Server.GameObjects.TransformSystem>();
                 systems.LoadExtraSystemType<BroadPhaseSystem>();

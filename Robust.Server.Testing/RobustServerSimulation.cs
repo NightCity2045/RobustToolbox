@@ -365,6 +365,7 @@ namespace Robust.UnitTesting.Server
             entitySystemMan.LoadExtraSystemType<Robust.Shared.Spatial.SharedGeometrySystem>();
             entitySystemMan.LoadExtraSystemType<Robust.Shared.Spatial.Physics.SharedSpatialPhysicsSystem>();
             entitySystemMan.LoadExtraSystemType<Robust.Shared.Spatial.Physics.SpatialQuerySystem>();
+            entitySystemMan.LoadExtraSystemType<Robust.Server.Spatial.SpatialInterestSystem>();
             entitySystemMan.LoadExtraSystemType<DebugPhysicsSystem>();
             entitySystemMan.LoadExtraSystemType<DebugRayDrawingSystem>();
             entitySystemMan.LoadExtraSystemType<BroadPhaseSystem>();

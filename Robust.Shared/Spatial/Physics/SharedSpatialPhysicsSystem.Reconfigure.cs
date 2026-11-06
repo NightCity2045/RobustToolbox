@@ -4,6 +4,9 @@ using Robust.Shared.GameObjects;
 
 namespace Robust.Shared.Spatial.Physics;
 
+[ByRefEvent]
+internal readonly record struct SpatialBodyDefinitionChanged(EntityUid Entity);
+
 public sealed partial class SharedSpatialPhysicsSystem
 {
     /// <summary>
@@ -56,6 +59,8 @@ public sealed partial class SharedSpatialPhysicsSystem
         if (replacement != null)
             _bindings.Add(body, replacement);
         Dirty(body);
+        var changed = new SpatialBodyDefinitionChanged(body);
+        RaiseLocalEvent(ref changed);
     }
 
     private void ValidateConstraintOwnershipChange(EntityUid body, SpatialBodyDefinition next)

@@ -17,6 +17,7 @@ internal sealed partial class PvsSystem
     /// </summary>
     private void AddPvsChunks(PvsSession pvsSession)
     {
+        AddSpatialEntities(pvsSession);
         foreach (var (chunk, distance) in CollectionsMarshal.AsSpan(pvsSession.Chunks))
         {
             AddPvsChunk(chunk, distance, pvsSession);

@@ -41,6 +41,7 @@ internal sealed partial class PvsSystem : EntitySystem
     [Dependency] private PvsOverrideSystem _pvsOverride = default!;
     [Dependency] private IServerReplayRecordingManager _replay = default!;
     [Dependency] private SharedMapSystem _maps = default!;
+    [Dependency] private Spatial.SpatialInterestSystem _spatialInterest = default!;
 
     // TODO make this a cvar. Make it in terms of seconds and tie it to tick rate?
     // Main issue is that I CBF figuring out the logic for handling it changing mid-game.
@@ -446,6 +447,7 @@ internal sealed partial class PvsSystem : EntitySystem
         // Figure out what chunks players can see and cache some chunk data.
         if (CullingEnabled)
         {
+            _spatialInterest.Prepare();
             GetVisibleChunks();
             ProcessVisibleChunks();
         }

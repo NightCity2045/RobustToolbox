@@ -118,6 +118,10 @@ internal sealed partial class PvsSystem
         if (mapUid is not {} map)
             return;
 
+        // Spatial maps use canonical XYZ bounds, including entities under rotated frames.
+        if (HasComp<Robust.Shared.Spatial.SpatialWorldComponent>(map))
+            return;
+
         var mapChunkEnumerator = new ChunkIndicesEnumerator(viewPos, range, ChunkSize);
         while (mapChunkEnumerator.MoveNext(out var chunkIndices))
         {
