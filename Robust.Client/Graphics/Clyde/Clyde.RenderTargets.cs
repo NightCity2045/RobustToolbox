@@ -120,6 +120,7 @@ namespace Robust.Client.Graphics.Clyde
                         case RTCF.RG32F:
                         case RTCF.R11FG11FB10F:
                         case RTCF.Rgba16F:
+                        case RTCF.Rgba32F:
                             _sawmillOgl.Warning("The framebuffer {0} [{1}] is trying to be floating-point when that's not supported. Forcing Rgba8.", name == null ? "[unnamed]" : name, size);
                             colorFormat = RTCF.Rgba8;
                             break;
@@ -133,6 +134,7 @@ namespace Robust.Client.Graphics.Clyde
                 {
                     RTCF.Rgba8 =>        (PIF.Rgba8,        PF.Rgba, PT.UnsignedByte),
                     RTCF.Rgba16F =>      (PIF.Rgba16f,      PF.Rgba, PT.Float),
+                    RTCF.Rgba32F =>      (PIF.Rgba32f,      PF.Rgba, PT.Float),
                     RTCF.Rgba8Srgb =>    (PIF.Srgb8Alpha8,  PF.Rgba, PT.UnsignedByte),
                     RTCF.R11FG11FB10F => (PIF.R11fG11fB10f, PF.Rgb,  PT.Float),
                     RTCF.R32F =>         (PIF.R32f,         PF.Red,  PT.Float),

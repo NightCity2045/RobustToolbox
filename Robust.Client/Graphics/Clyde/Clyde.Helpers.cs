@@ -63,6 +63,7 @@ namespace Robust.Client.Graphics.Clyde
             {
                 PixelInternalFormat.Rgba8 => 4,
                 PixelInternalFormat.Rgba16f => 8,
+                PixelInternalFormat.Rgba32f => 16,
                 PixelInternalFormat.Srgb8Alpha8 => 4,
                 PixelInternalFormat.R11fG11fB10f => 4,
                 PixelInternalFormat.R32f => 4,

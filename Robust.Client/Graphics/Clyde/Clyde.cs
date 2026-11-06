@@ -106,6 +106,8 @@ namespace Robust.Client.Graphics.Clyde
             _sawmillWin = _logManager.GetSawmill("clyde.win");
 
             _reloads.Register("/Shaders", "*.swsl");
+            _reloads.Register("/Shaders/Internal", "spatial-*.vert");
+            _reloads.Register("/Shaders/Internal", "spatial-*.frag");
             _reloads.Register("/Textures/Shaders", "*.swsl");
             _reloads.Register("/Textures", "*.jpg");
             _reloads.Register("/Textures", "*.jpeg");
@@ -155,6 +157,16 @@ namespace Robust.Client.Graphics.Clyde
 
         private void OnChange(ResPath obj)
         {
+            if (obj.TryRelativeTo(new ResPath("/Shaders/Internal"), out _) && obj.Filename.StartsWith("spatial-")
+                && obj.Extension is "vert" or "frag")
+            {
+                foreach (var renderer in _spatialRenderers)
+                {
+                    try { renderer.ReloadShaders(); }
+                    catch (Exception e) { _clydeSawmill.Warning($"Spatial shader reload failed; retaining previous programs: {e}"); }
+                }
+            }
+
             if ((obj.TryRelativeTo(new ResPath("/Shaders"), out _) || obj.TryRelativeTo(new ResPath("/Textures/Shaders"), out _)) && obj.Extension == "swsl")
             {
                 _resourceCache.ReloadResource<ShaderSourceResource>(obj);
@@ -579,6 +591,7 @@ namespace Robust.Client.Graphics.Clyde
 
         public void Shutdown()
         {
+            foreach (var renderer in _spatialRenderers.ToArray()) renderer.Dispose();
             ClearPostShaderRenderTargetPool();
             _postShaderEventEntries.Clear();
 

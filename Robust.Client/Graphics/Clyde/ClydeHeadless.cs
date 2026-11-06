@@ -28,6 +28,9 @@ namespace Robust.Client.Graphics.Clyde
     {
         // Would it make sense to report a fake resolution like 720p here so code doesn't break? idk.
         public bool IsInitialized { get; private set; }
+        public bool SupportsSpatialRendering => false;
+        public Spatial.ISpatialRenderer CreateSpatialRenderer(Vector2i size, Spatial.SpatialRendererLimits limits)
+            => throw new NotSupportedException("A headless client has no spatial graphics context.");
         public IClydeWindow MainWindow { get; }
         public Vector2i ScreenSize => (1280, 720);
         public IEnumerable<IClydeWindow> AllWindows => _windows;

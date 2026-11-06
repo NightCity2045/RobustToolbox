@@ -112,6 +112,9 @@ namespace Robust.Client.Graphics
         IRenderTexture CreateRenderTarget(Vector2i size, RenderTargetFormatParameters format,
             TextureSampleParameters? sampleParameters = null, string? name = null);
 
+        bool SupportsSpatialRendering { get; }
+        Spatial.ISpatialRenderer CreateSpatialRenderer(Vector2i size, Spatial.SpatialRendererLimits limits);
+
         // Cursor API.
         /// <summary>
         ///     Gets a cursor object representing standard cursors that match the OS styling.

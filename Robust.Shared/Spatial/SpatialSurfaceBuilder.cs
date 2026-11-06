@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using Robust.Shared.Maths;
 
 namespace Robust.Shared.Spatial;
@@ -13,18 +14,30 @@ namespace Robust.Shared.Spatial;
 public static class SpatialSurfaceBuilder
 {
     public static IReadOnlyList<SpatialSurfacePatch> Build(SpatialGeometrySnapshot snapshot)
+        => Array.AsReadOnly(Enumerate(snapshot).ToArray());
+
+    /// <summary>Stream exterior patches so bounded/cancellable consumers need not allocate the complete mesh first.</summary>
+    public static IEnumerable<SpatialSurfacePatch> Enumerate(SpatialGeometrySnapshot snapshot, CancellationToken cancellationToken = default)
+        => Enumerate(snapshot, null, cancellationToken);
+
+    // Filtering source solids still uses ALL snapshot solids for occlusion.
+    // Client chunk updates must not expose an internal face at the work boundary.
+    internal static IEnumerable<SpatialSurfacePatch> Enumerate(SpatialGeometrySnapshot snapshot,
+        Func<SpatialSolidPart, bool>? includeSource, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
+        cancellationToken.ThrowIfCancellationRequested();
         var solids = snapshot.SolidParts;
         var sorted = Enumerable.Range(0, solids.Count)
             .OrderBy(i => solids[i].Surface.Surface.Value).ThenBy(i => i).ToArray();
         var volumes = new SpatialSolidIndex(solids);
         var neighbors = new List<int>();
         var pending = new Stack<int>();
-        var patches = new List<SpatialSurfacePatch>();
         foreach (var index in sorted)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var source = solids[index];
+            if (includeSource != null && !includeSource(source)) continue;
             var bounds = source.Bounds;
             volumes.FindIntersections(bounds, neighbors, pending);
 
@@ -57,10 +70,12 @@ public static class SpatialSurfaceBuilder
                         holes.Add(clip);
                 }
                 foreach (var exterior in PlanarRegionPartition.Subtract(region, holes))
-                    patches.Add(new SpatialSurfacePatch(source, (SpatialFaceDirection) face, plane, exterior));
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    yield return new SpatialSurfacePatch(source, (SpatialFaceDirection) face, plane, exterior);
+                }
             }
         }
-        return patches.AsReadOnly();
     }
 
     private static float Coordinate(System.Numerics.Vector3 point, int axis)

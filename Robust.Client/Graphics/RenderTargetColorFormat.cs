@@ -26,5 +26,8 @@ namespace Robust.Client.Graphics
         R11FG11FB10F,
 
         R8,
+
+        /// <summary>32-bit floating point accumulation, including weighted transparency.</summary>
+        Rgba32F,
     }
 }

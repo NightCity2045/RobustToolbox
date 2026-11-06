@@ -17,6 +17,7 @@
 [assembly: InternalsVisibleTo("Robust.Server.Testing")]
 [assembly: InternalsVisibleTo("Robust.Shared.Testing")]
 [assembly: InternalsVisibleTo("Robust.Client.IntegrationTests")]
+[assembly: InternalsVisibleTo("Robust.Client.Tests")]
 [assembly: InternalsVisibleTo("Robust.Shared.IntegrationTests")]
 
 #if NET5_0_OR_GREATER
