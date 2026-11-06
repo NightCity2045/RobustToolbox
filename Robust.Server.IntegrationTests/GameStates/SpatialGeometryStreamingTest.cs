@@ -1,0 +1,180 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Numerics;
+using System.Threading.Tasks;
+using NUnit.Framework;
+using Robust.Server.GameObjects;
+using Robust.Shared;
+using Robust.Shared.GameObjects;
+using Robust.Shared.Maths;
+using Robust.Shared.Network;
+using Robust.Shared.Spatial;
+using Robust.Shared.Spatial.Networking;
+using ClientStreaming = Robust.Client.Spatial.SpatialGeometryStreamingSystem;
+
+namespace Robust.UnitTesting.Server.GameStates;
+
+[TestFixture]
+public sealed class SpatialGeometryStreamingTest : RobustIntegrationTest
+{
+    [TestCase(true)]
+    [TestCase(false)]
+    public async Task LargeBaselineProgressResetAndMultiFrameTransaction(bool pvs)
+    {
+        await using var pair = await StartConnectedPair();
+        var (client, server) = pair;
+        await RunTicksSync(server, client, 10);
+        EntityUid world = default, first = default, second = default, viewer = default;
+        NetEntity worldNet = default, firstNet = default, secondNet = default;
+        var layer = new LayerId(1);
+        await server.WaitPost(() =>
+        {
+            server.CfgMan.SetCVar(CVars.NetPVS, pvs);
+            server.CfgMan.SetCVar(CVars.NetSpatialGeometryBytes, 65536);
+            world = server.System<SharedSpatialSystem>().CreateWorld();
+            first = CreateFrame(server.EntMan, world, 200);
+            second = CreateFrame(server.EntMan, world, 1);
+            worldNet = server.EntMan.GetNetEntity(world);
+            firstNet = server.EntMan.GetNetEntity(first);
+            secondNet = server.EntMan.GetNetEntity(second);
+            viewer = server.EntMan.SpawnAttachedTo(null, world, RigidTransform3.Identity);
+            var session = server.PlayerMan.Sessions.First();
+            server.PlayerMan.SetAttachedEntity(session, viewer);
+            server.PlayerMan.JoinGame(session);
+        });
+        // The first frame exceeds the 256 KiB outstanding fragment window. This
+        // cannot complete unless the real message path returns progress ACKs.
+        await RunTicksSync(server, client, 70);
+        ulong sequence = 0;
+        await client.WaitAssertion(() =>
+        {
+            var streaming = client.System<ClientStreaming>();
+            Assert.That(streaming.TryGetSnapshot(client.EntMan.GetEntity(firstNet), out var snapshot), Is.True);
+            Assert.That(snapshot!.Slabs.Count, Is.EqualTo(200));
+            Assert.That(snapshot.OwnerFrame, Is.EqualTo(client.EntMan.GetEntity(firstNet)));
+            Assert.That(streaming.TryGetSnapshot(client.EntMan.GetEntity(secondNet), out _), Is.True);
+            Assert.That(streaming.IsReady(client.EntMan.GetEntity(worldNet), new Box3(new Vector3(-1), new Vector3(1))), Is.True);
+            Assert.That(streaming.IsReady(client.EntMan.GetEntity(worldNet), new Box3(new Vector3(999), new Vector3(1000))), Is.False);
+            sequence = streaming.Sequence;
+            client.ResolveDependency<IClientNetManager>().ClientSendMessage(new MsgSpatialGeometryRequestBaseline { LastSequence = sequence });
+        });
+        await RunTicksSync(server, client, 70);
+        await client.WaitAssertion(() =>
+        {
+            var streaming = client.System<ClientStreaming>();
+            Assert.That(streaming.Sequence, Is.GreaterThan(sequence), "A full reset must not stall on cached payload ACKs.");
+            Assert.That(streaming.IsReady(client.EntMan.GetEntity(worldNet), new Box3(new Vector3(-1), new Vector3(1))), Is.True);
+        });
+        await server.WaitPost(() =>
+        {
+            var geometry = server.System<SharedGeometrySystem>();
+            var transaction = geometry.PrepareTransaction(new[] { first, second }.Select(frame =>
+                new SpatialGeometryEdit(geometry.CaptureSnapshot(frame), layers:
+                    new Dictionary<LayerId, LayerDefinition> { [layer] = new(2, "Raised floor") })));
+            geometry.QueueTransaction(transaction);
+        });
+        await RunTicksSync(server, client, 70);
+        await client.WaitAssertion(() =>
+        {
+            var streaming = client.System<ClientStreaming>();
+            foreach (var frame in new[] { firstNet, secondNet })
+            {
+                Assert.That(streaming.TryGetSnapshot(client.EntMan.GetEntity(frame), out var snapshot), Is.True);
+                Assert.That(snapshot!.Revision, Is.EqualTo(1));
+                Assert.That(snapshot.Layers[layer].LocalElevation, Is.EqualTo(2));
+            }
+            Assert.That(streaming.IsReady(client.EntMan.GetEntity(worldNet), new Box3(new Vector3(-1), new Vector3(1))), Is.True);
+        });
+        ClientStreaming disconnectedReplica = default!;
+        await client.WaitPost(() => disconnectedReplica = client.System<ClientStreaming>());
+        await DisconnectClient(server, client);
+        await client.WaitAssertion(() => Assert.That(disconnectedReplica.Sequence, Is.Zero));
+        await server.WaitPost(() =>
+        {
+            // Geometry changes while this client has no connection. The next
+            // session must establish a fresh baseline, not resurrect its cache.
+            var geometry = server.System<SharedGeometrySystem>();
+            geometry.QueueTransaction(geometry.PrepareTransaction(new[]
+            {
+                new SpatialGeometryEdit(geometry.CaptureSnapshot(first), slabs: Array.Empty<SlabSurface>())
+            }));
+        });
+        await ConnectClient(server, client);
+        await RunTicksSync(server, client, 10);
+        await server.WaitPost(() =>
+        {
+            var session = server.PlayerMan.Sessions.First();
+            server.PlayerMan.SetAttachedEntity(session, viewer);
+            server.PlayerMan.JoinGame(session);
+        });
+        await RunTicksSync(server, client, 40);
+        await client.WaitAssertion(() =>
+        {
+            var streaming = client.System<ClientStreaming>();
+            Assert.That(streaming.TryGetSnapshot(client.EntMan.GetEntity(firstNet), out _), Is.False,
+                "Removed geometry must not survive the disconnected session.");
+            Assert.That(streaming.TryGetSnapshot(client.EntMan.GetEntity(secondNet), out var snapshot), Is.True);
+            Assert.That(snapshot!.Revision, Is.EqualTo(1));
+            Assert.That(streaming.IsReady(client.EntMan.GetEntity(worldNet), new Box3(new Vector3(-1), new Vector3(1))), Is.True);
+        });
+    }
+
+    [Test]
+    public async Task DeniedSurfaceDoesNotLeakAndDoesNotCertifyEmptyCollision()
+    {
+        await using var pair = await StartConnectedPair();
+        var (client, server) = pair;
+        await RunTicksSync(server, client, 10);
+        EntityUid hidden = default;
+        NetEntity worldNet = default, publicNet = default, hiddenFrameNet = default;
+        await server.WaitPost(() =>
+        {
+            server.CfgMan.SetCVar(CVars.NetPVS, true);
+            var world = server.System<SharedSpatialSystem>().CreateWorld();
+            worldNet = server.EntMan.GetNetEntity(world);
+            publicNet = server.EntMan.GetNetEntity(CreateFrame(server.EntMan, world, 1));
+            hidden = server.EntMan.SpawnAttachedTo(null, world, RigidTransform3.Identity);
+            var visibility = server.EntMan.AddComponent<VisibilityComponent>(hidden);
+            server.System<VisibilitySystem>().AddLayer((hidden, visibility), 2);
+            hiddenFrameNet = server.EntMan.GetNetEntity(CreateFrame(server.EntMan, world, 1, hidden));
+            var viewer = server.EntMan.SpawnAttachedTo(null, world, RigidTransform3.Identity);
+            var session = server.PlayerMan.Sessions.First();
+            server.PlayerMan.SetAttachedEntity(session, viewer);
+            server.PlayerMan.JoinGame(session);
+        });
+        await RunTicksSync(server, client, 30);
+        await client.WaitAssertion(() =>
+        {
+            var streaming = client.System<ClientStreaming>();
+            Assert.That(streaming.TryGetSnapshot(client.EntMan.GetEntity(publicNet), out _), Is.True);
+            Assert.That(streaming.TryGetSnapshot(client.EntMan.GetEntity(hiddenFrameNet), out _), Is.False);
+            Assert.That(streaming.IsReady(client.EntMan.GetEntity(worldNet), new Box3(new Vector3(-1), new Vector3(1))), Is.False);
+        });
+        await server.WaitPost(() => server.System<VisibilitySystem>().RemoveLayer(hidden, 2));
+        await RunTicksSync(server, client, 30);
+        await client.WaitAssertion(() =>
+        {
+            var streaming = client.System<ClientStreaming>();
+            Assert.That(streaming.TryGetSnapshot(client.EntMan.GetEntity(hiddenFrameNet), out var snapshot), Is.True);
+            Assert.That(snapshot!.Slabs.Values.Single().Entity, Is.Not.Null);
+            Assert.That(streaming.IsReady(client.EntMan.GetEntity(worldNet), new Box3(new Vector3(-1), new Vector3(1))), Is.True);
+        });
+    }
+
+    private static EntityUid CreateFrame(IEntityManager entities, EntityUid world, int slabs, EntityUid? source = null)
+    {
+        var uid = entities.CreateEntityUninitialized(null, world, RigidTransform3.Identity);
+        var layer = new LayerId(1);
+        var frame = entities.AddComponent<SpatialFrameComponent>(uid);
+        entities.System<SharedSpatialSystem>().ConfigureInitialLayers((uid, frame),
+            new Dictionary<LayerId, LayerDefinition> { [layer] = new(0, "Floor") });
+        var geometry = entities.AddComponent<SpatialGeometryComponent>(uid);
+        entities.System<SharedGeometrySystem>().ConfigureInitialGeometry((uid, geometry), Array.Empty<BoundarySegment>(),
+            Enumerable.Range(0, slabs).Select(i => new SlabSurface(new SpatialSurfaceReference(uid, new SurfaceId((uint) i)),
+                layer, new Box2(i % 20 * 0.5f, i / 20 * 0.5f, i % 20 * 0.5f + 0.4f, i / 20 * 0.5f + 0.4f),
+                0, 0.2f, materialProfile: slabs > 1 ? new string('m', 2000) : "metal", entity: source)));
+        entities.InitializeAndStartEntity(uid);
+        return uid;
+    }
+}

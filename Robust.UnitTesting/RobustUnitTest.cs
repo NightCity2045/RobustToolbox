@@ -152,6 +152,7 @@ namespace Robust.UnitTesting
                 systems.LoadExtraSystemType<ServerMetaDataSystem>();
                 systems.LoadExtraSystemType<PvsSystem>();
                 systems.LoadExtraSystemType<Robust.Server.Spatial.SpatialInterestSystem>();
+                systems.LoadExtraSystemType<Robust.Server.Spatial.SpatialGeometryStreamingSystem>();
                 systems.LoadExtraSystemType<Robust.Shared.Spatial.SharedSpatialSystem>();
                 systems.LoadExtraSystemType<Robust.Shared.Spatial.SharedGeometrySystem>();
                 systems.LoadExtraSystemType<Robust.Server.Containers.ContainerSystem>();

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Serialization.Manager.Attributes;
@@ -18,6 +19,9 @@ public sealed partial class SpatialGeometryComponent : Component
     // Ephemeral capture identity: removing/readding a component cannot make an
     // old background result current merely by reusing its numerical revision.
     internal readonly object CaptureIdentity = new();
+    // A new component/load gets a new wire lifetime, even if revision returns to zero.
+    // This transport token is not persisted authoring state.
+    internal readonly Guid WireGeneration = Guid.NewGuid();
     public const uint CurrentSchema = 1;
     [DataField("schema")] internal uint _schema = CurrentSchema;
     [DataField("revision")] internal ulong _revision;

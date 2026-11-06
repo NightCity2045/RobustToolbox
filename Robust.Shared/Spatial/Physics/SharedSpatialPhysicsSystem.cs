@@ -427,6 +427,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
         return found;
     }
     internal int GetBodyCount(EntityUid world) => _worlds[world].BodyCount;
+    internal bool HasActiveCollision(EntityUid entity) => _bindings.ContainsKey(entity);
 
     private void RequireServer()
     {

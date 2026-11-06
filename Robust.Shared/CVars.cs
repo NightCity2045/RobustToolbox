@@ -295,6 +295,10 @@ namespace Robust.Shared
         public static readonly CVarDef<float> NetSpatialPreloadDistance =
             CVarDef.Create("net.spatial_preload_distance", 64f, CVar.ARCHIVE | CVar.SERVERONLY);
 
+        /// <summary>Maximum geometry payload bytes queued per client per tick, additionally limited by a progress window.</summary>
+        public static readonly CVarDef<int> NetSpatialGeometryBytes =
+            CVarDef.Create("net.spatial_geometry_bytes", 65536, CVar.ARCHIVE | CVar.SERVERONLY);
+
         /// <summary>
         /// A variant of <see cref="NetMaxUpdateRange"/> that is used to limit the view-distance of entities with the
         /// <see cref="MetaDataFlags.PvsPriority"/> flag set. This can be used to extend the range at which certain

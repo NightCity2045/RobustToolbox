@@ -53,5 +53,8 @@ public sealed partial class SharedGeometrySystem : EntitySystem
     }
 
     private void OnInit(EntityUid uid, SpatialGeometryComponent component, ComponentInit args)
-        => CaptureSnapshot(uid);
+    {
+        CaptureSnapshot(uid);
+        if (TryComp<SpatialFrameComponent>(uid, out var frame)) Dirty(uid, frame);
+    }
 }

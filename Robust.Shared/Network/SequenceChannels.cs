@@ -5,4 +5,5 @@ internal static class SequenceChannels
     public const int EngineBase = 16;
 
     public const int Transfer = EngineBase;
+    public const int SpatialGeometry = EngineBase + 1;
 }

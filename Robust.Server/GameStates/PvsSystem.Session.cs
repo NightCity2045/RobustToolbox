@@ -43,7 +43,10 @@ internal sealed partial class PvsSystem
         if (CullingEnabled && !session.DisableCulling)
             GetEntityStates(session);
         else
+        {
             GetAllEntityStates(session);
+            AddSpatialEntities(session, replicate: false);
+        }
 
         _playerManager.GetPlayerStates(session.FromTick, session.PlayerStates);
 

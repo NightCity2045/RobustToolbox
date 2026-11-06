@@ -3,7 +3,7 @@
 The fork identifies itself as `ss14-spatial-295` before authentication/world
 loading. Its handshake stamp contains a magic marker, wire revision and SHA-256
 fingerprint of `Robust.Shared/Spatial/spatial-protocol.json`. The descriptor records
-map/transform/world/geometry schemas and the pinned physics backend/version. Runtime
+map/transform/world/geometry and geometry-wire schemas and the pinned physics backend/version. Runtime
 initialization verifies the descriptor against the compiled constants and backend
 assembly. Upstream's engine version alone is not a compatibility check.
 
@@ -24,5 +24,7 @@ package mismatch is rejected by packaging as well as runtime initialization.
 Tests exercise truncated/legacy stamps, schema/backend mismatch, both sides of
 actual UDP handshakes and a matching connection through the real socket transport
 and mapped-string serializer. They do not use the integration transport shortcut
-for these handshake checks. E07's 3D interest, geometry baselines/deltas and local
-prediction remain separate integrations.
+for these handshake checks. Wire revision 2 adds the frame lifetime/revision stamp
+and acknowledged semantic geometry transport; see
+[spatial-streaming.md](spatial-streaming.md). Local prediction and history remain
+separate integrations.

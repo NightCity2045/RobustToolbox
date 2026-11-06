@@ -205,6 +205,7 @@ public sealed partial class SharedGeometrySystem
 
     private void OnGeometryShutdown(EntityUid uid, SpatialGeometryComponent component, ComponentShutdown args)
     {
+        if (!TerminatingOrDeleted(uid) && TryComp<SpatialFrameComponent>(uid, out var frame)) Dirty(uid, frame);
         foreach (var transaction in _transactions.Where(t => t.Changes.Any(c => c.Before.OwnerFrame == uid)).ToArray())
             Finish(transaction, WorldEditStatus.Rejected, "An edited geometry frame was removed.");
         var ev = new SpatialGeometryStopping();

@@ -156,6 +156,7 @@ namespace Robust.Server.GameObjects
         public void SetupNetworking()
         {
             _networkManager.RegisterNetMessage<MsgEntity>(HandleEntityNetworkMessage);
+            SetupSpatialNetworking();
 
             _playerManager.PlayerStatusChanged += OnPlayerStatusChanged;
 

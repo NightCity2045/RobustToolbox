@@ -26,8 +26,10 @@ public struct SpatialInterestVisibilityEvent(ICommonSession session, EntityUid e
 
 internal sealed partial class PvsSystem
 {
-    private void AddSpatialEntities(PvsSession session)
+    private void AddSpatialEntities(PvsSession session, bool replicate = true)
     {
+        var selection = session.SpatialGeometry;
+        selection.Clear();
         var selected = new Dictionary<EntityUid, double>();
         var allowedCache = new Dictionary<EntityUid, bool>();
         var candidates = new HashSet<EntityUid>();
@@ -51,7 +53,10 @@ internal sealed partial class PvsSystem
             var bounds = new Box3(Vector3.Min(position, target) - extent, Vector3.Max(position, target) + extent);
             candidates.Clear();
             surfaces.Clear();
-            _spatialInterest.CollectPrepared(map, bounds, Allowed, candidates, surfaces);
+            if (!_spatialInterest.CollectPrepared(map, bounds, Allowed, candidates, surfaces)) selection.Complete = false;
+            selection.Views.Add((map, bounds));
+            selection.Viewers.Add(viewer.Owner);
+            selection.Surfaces.UnionWith(surfaces);
             foreach (var uid in candidates)
             {
                 var relative = _transform.GetWorldPose(uid).Position - position;
@@ -68,21 +73,15 @@ internal sealed partial class PvsSystem
         });
         var visiting = new HashSet<EntityUid>();
         var added = new HashSet<EntityUid>();
-        foreach (var uid in sorted) AddWithDependencies(uid);
+        if (replicate)
+            foreach (var uid in sorted)
+                if (!AddWithDependencies(uid)) selection.Complete = false;
         return;
 
         bool Allowed(EntityUid uid)
         {
             if (allowedCache.TryGetValue(uid, out var cached)) return cached;
-            if (!_metaQuery.TryGetComponent(uid, out var meta) || meta.EntityLifeStage >= EntityLifeStage.Terminating
-                || (session.VisMask & meta.VisibilityMask) != meta.VisibilityMask
-                || !_xformQuery.TryGetComponent(uid, out var transform))
-                return allowedCache[uid] = false;
-            var allowed = (meta.Flags & MetaDataFlags.InContainer) == 0;
-            var ev = new SpatialInterestVisibilityEvent(session.Session, uid, allowed);
-            RaiseLocalEvent(ref ev);
-            return allowedCache[uid] = ev.Allowed
-                && (!transform.ParentUid.IsValid() || Allowed(transform.ParentUid));
+            return allowedCache[uid] = IsSpatialEntityAllowed(session, uid);
         }
 
         bool AddWithDependencies(EntityUid uid)
@@ -98,6 +97,7 @@ internal sealed partial class PvsSystem
                     if (support.Source.Surface is { } surface && surface.OwnerFrame != uid
                         && !AddWithDependencies(surface.OwnerFrame)) return false;
                     if (support.Source.Entity is { } entity && entity != uid && !AddWithDependencies(entity)) return false;
+                    if (support.Source.Surface is { } needed) selection.Surfaces.Add(needed);
                 }
                 if (!AddEntity(session, (uid, _metaQuery.GetComponent(uid)), session.FromTick)) return false;
                 added.Add(uid);
@@ -105,6 +105,16 @@ internal sealed partial class PvsSystem
             }
             finally { visiting.Remove(uid); }
         }
+    }
+
+    private bool IsSpatialEntityAllowed(PvsSession session, EntityUid uid)
+    {
+        if (!_metaQuery.TryGetComponent(uid, out var meta) || meta.EntityLifeStage >= EntityLifeStage.Terminating
+            || (session.VisMask & meta.VisibilityMask) != meta.VisibilityMask
+            || !_xformQuery.TryGetComponent(uid, out var transform)) return false;
+        var ev = new SpatialInterestVisibilityEvent(session.Session, uid, (meta.Flags & MetaDataFlags.InContainer) == 0);
+        RaiseLocalEvent(ref ev);
+        return ev.Allowed && (!transform.ParentUid.IsValid() || IsSpatialEntityAllowed(session, transform.ParentUid));
     }
 
     private Vector3 GetSpatialPreload(EntityUid viewer, Vector3 position, float seconds, float maximum)

@@ -250,26 +250,35 @@ public sealed partial class SpatialInterestSystem : EntitySystem, ISpatialIntere
         CollectPrepared(world, bounds, allowed, entities, surfaces);
     }
 
-    internal void CollectPrepared(EntityUid world, Box3 bounds, Func<EntityUid, bool> allowed,
+    internal bool CollectPrepared(EntityUid world, Box3 bounds, Func<EntityUid, bool> allowed,
         ISet<EntityUid> entities, ISet<SpatialSurfaceReference> surfaces)
     {
         if (!bounds.IsValid) throw new ArgumentException("Interest requires finite, positive-volume bounds.");
         ArgumentNullException.ThrowIfNull(allowed);
         ArgumentNullException.ThrowIfNull(entities);
         ArgumentNullException.ThrowIfNull(surfaces);
-        if (!_worlds.TryGetValue(world, out var index)) return;
+        if (!_worlds.TryGetValue(world, out var index)) return false;
+        var complete = true;
         var candidates = new List<EntityUid>();
         index.Entities.Query(bounds.Min, bounds.Max, candidates);
         foreach (var uid in candidates)
+        {
             if (allowed(uid)) entities.Add(uid);
+            else if (EntityManager.TrySystem<SharedSpatialPhysicsSystem>(out var physics) && physics.HasActiveCollision(uid)) complete = false;
+        }
         var geometry = new List<SurfaceEntry>();
         index.Geometry.Query(bounds.Min, bounds.Max, geometry);
         foreach (var hit in geometry)
         {
-            if (!allowed(hit.Surface.OwnerFrame) || hit.Source is { } source && !allowed(source)) continue;
+            if (!allowed(hit.Surface.OwnerFrame) || hit.Source is { } source && !allowed(source))
+            {
+                complete = false;
+                continue;
+            }
             entities.Add(hit.Surface.OwnerFrame);
             if (hit.Source is { } entity) entities.Add(entity);
             surfaces.Add(hit.Surface);
         }
+        return complete;
     }
 }

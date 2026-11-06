@@ -31,6 +31,7 @@ public static class SpatialProtocol
             || root.GetProperty("transform_schema").GetInt32() != EntitySerializer.TransformSchemaVersion
             || root.GetProperty("world_schema").GetInt32() != SpatialWorldComponent.CurrentDefinitionSchema
             || root.GetProperty("geometry_schema").GetInt32() != SpatialGeometryComponent.CurrentSchema
+            || root.GetProperty("geometry_wire_schema").GetUInt32() != Networking.SpatialGeometryWireCodec.Version
             || root.GetProperty("physics_backend").GetString() != typeof(Simulation).Assembly.GetName().Name
             || root.GetProperty("physics_version").GetString() != typeof(Simulation).Assembly.GetName().Version!.ToString(3))
             throw new InvalidOperationException("Spatial protocol descriptor does not match the compiled schemas/backend.");

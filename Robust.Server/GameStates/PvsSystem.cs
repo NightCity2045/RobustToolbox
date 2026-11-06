@@ -42,6 +42,7 @@ internal sealed partial class PvsSystem : EntitySystem
     [Dependency] private IServerReplayRecordingManager _replay = default!;
     [Dependency] private SharedMapSystem _maps = default!;
     [Dependency] private Spatial.SpatialInterestSystem _spatialInterest = default!;
+    [Dependency] private Spatial.SpatialGeometryStreamingSystem _spatialGeometry = default!;
 
     // TODO make this a cvar. Make it in terms of seconds and tie it to tick rate?
     // Main issue is that I CBF figuring out the logic for handling it changing mid-game.
@@ -209,6 +210,9 @@ internal sealed partial class PvsSystem : EntitySystem
 
         // Construct & serialize the game state for each player (and update the replay).
         SerializeStates();
+        foreach (var session in _sessions)
+            _spatialGeometry.Publish(session.Session, session.SpatialGeometry,
+                uid => IsSpatialEntityAllowed(session, uid));
 
         foreach (var uid in _toDelete)
         {
@@ -443,14 +447,16 @@ internal sealed partial class PvsSystem : EntitySystem
         DebugTools.Assert(_chunkSets.Keys.All(Exists));
 
         var ackJob = ProcessQueuedAcks();
+        _spatialInterest.Prepare();
 
         // Figure out what chunks players can see and cache some chunk data.
         if (CullingEnabled)
         {
-            _spatialInterest.Prepare();
             GetVisibleChunks();
             ProcessVisibleChunks();
         }
+        else
+            foreach (var session in _sessions) GetSessionViewers(session);
 
         ackJob?.WaitOne();
     }

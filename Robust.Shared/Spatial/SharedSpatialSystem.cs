@@ -220,11 +220,22 @@ public sealed partial class SharedSpatialSystem : EntitySystem
         => component._layers = ValidateLayers(component._layers);
 
     private void OnFrameGetState(EntityUid uid, SpatialFrameComponent component, ref ComponentGetState args)
-        => args.State = new SpatialFrameComponentState(component._layers);
+    {
+        var stamp = TryComp<SpatialGeometryComponent>(uid, out var geometry) && geometry.Running
+            ? new SpatialGeometryStamp(geometry.WireGeneration, geometry.Revision) : (SpatialGeometryStamp?) null;
+        args.State = new SpatialFrameComponentState(component._layers, stamp);
+    }
 
     internal void OnFrameHandleState(EntityUid uid, SpatialFrameComponent component, ref ComponentHandleState args)
     {
-        if (args.Current is SpatialFrameComponentState state)
-            component._layers = ValidateLayers(state.Layers);
+        if (args.Current is not SpatialFrameComponentState state) return;
+        var layers = ValidateLayers(state.Layers);
+        if (state.Geometry is { Generation: var generation } && generation == Guid.Empty)
+            throw new InvalidOperationException("Geometry state requires a nonempty wire generation.");
+        component._layers = layers;
+        if (component.ReceivedGeometryStamp == state.Geometry) return;
+        component.ReceivedGeometryStamp = state.Geometry;
+        var ev = new SpatialGeometryStampChanged(state.Geometry);
+        RaiseLocalEvent(uid, ref ev);
     }
 }

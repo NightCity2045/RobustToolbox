@@ -13,12 +13,21 @@ namespace Robust.Shared.Spatial;
 public sealed partial class SpatialFrameComponent : Component
 {
     [DataField("layers")] internal Dictionary<LayerId, LayerDefinition> _layers = new();
+    internal SpatialGeometryStamp? ReceivedGeometryStamp;
 
     public IReadOnlyDictionary<LayerId, LayerDefinition> Layers => new ReadOnlyDictionary<LayerId, LayerDefinition>(_layers);
 }
 
 [Serializable, NetSerializable]
-public sealed class SpatialFrameComponentState(Dictionary<LayerId, LayerDefinition> layers) : ComponentState
+public readonly record struct SpatialGeometryStamp(Guid Generation, ulong Revision);
+
+[ByRefEvent]
+internal readonly record struct SpatialGeometryStampChanged(SpatialGeometryStamp? Stamp);
+
+[Serializable, NetSerializable]
+public sealed class SpatialFrameComponentState(Dictionary<LayerId, LayerDefinition> layers,
+    SpatialGeometryStamp? geometry = null) : ComponentState
 {
     public readonly Dictionary<LayerId, LayerDefinition> Layers = new(layers);
+    public readonly SpatialGeometryStamp? Geometry = geometry;
 }

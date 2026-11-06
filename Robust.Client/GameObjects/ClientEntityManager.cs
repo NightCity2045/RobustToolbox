@@ -226,6 +226,7 @@ namespace Robust.Client.GameObjects
         public void SetupNetworking()
         {
             _networkManager.RegisterNetMessage<MsgEntity>(HandleEntityNetworkMessage);
+            SetupSpatialNetworking();
         }
 
         public override void TickUpdate(float frameTime, bool noPredictions, Histogram? histogram)

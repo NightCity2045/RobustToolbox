@@ -20,6 +20,7 @@ namespace Robust.Server.GameStates;
 /// </summary>
 internal sealed class PvsSession(ICommonSession session, ResizableMemoryRegion<PvsData> memoryRegion)
 {
+    internal readonly Spatial.SpatialGeometrySelection SpatialGeometry = new();
 #if DEBUG
     public HashSet<NetEntity> ToSendSet = new();
 #endif

@@ -40,10 +40,11 @@ second network entity representation is introduced.
 
 `Collect` is a main-thread candidate query that prepares current derived indexes
 and requires an explicit entity-policy predicate. Its surface results identify
-semantic geometry needed in the selected volume. They do not yet constitute
-the geometry chunk transport, collision-readiness barrier, reconnect revision
-baseline, prediction/reconciliation or historical-query implementation. Those
-remaining E07 requirements must be completed before G7 acceptance.
+semantic geometry needed in the selected volume. The acknowledged semantic
+transport and its read-only readiness API are described in
+[spatial-streaming.md](spatial-streaming.md). Client collision consumption,
+prediction/reconciliation, history and remaining transport qualification still
+need completion before G7 acceptance.
 
 Coverage includes randomized insert/move/remove against brute force, concurrent
 readers, real client/server height culling, parent movement and re-entry, hidden
