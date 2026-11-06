@@ -57,13 +57,11 @@ public sealed partial class SharedGeometrySystem
                 world = owner;
                 ValidateSources(edit.Draft, owner);
                 var change = GeometryChangeBuilder.Build(CaptureSnapshot(edit.Frame), edit.Draft);
-                var body = EntityManager.System<SharedSpatialPhysicsSystem>().PrepareGeometryBody(edit.Frame, owner, change.After,
-                    change.Surfaces.Count == 0);
-                if (body != null) prepared.Add(body);
                 changes.Add(change);
                 geometry.Add(component);
                 frames.Add(Comp<SpatialFrameComponent>(edit.Frame));
             }
+            prepared.AddRange(EntityManager.System<SharedSpatialPhysicsSystem>().PrepareGeometryBodies(world!.Value, changes));
             TryComp<SpatialPhysicsWorldComponent>(world!.Value, out var profile);
             var transaction = new WorldEditTransaction(this, world.Value, changes.ToArray(), geometry.ToArray(),
                 frames.ToArray(), prepared.ToArray(), profile);

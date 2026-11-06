@@ -87,6 +87,8 @@ public sealed partial class SharedSpatialPhysicsSystem
             throw new InvalidOperationException("A connection and both bodies must belong to the same spatial physics world.");
         var a = Motion(definition.BodyA);
         var b = Motion(definition.BodyB);
+        if (ResolvePhysicalOwner(definition.BodyA) == ResolvePhysicalOwner(definition.BodyB))
+            throw new InvalidOperationException("A connection requires distinct physical roots; compound members are already rigidly attached.");
         if (!IsDynamicOwner(a) && !IsDynamicOwner(b))
             throw new InvalidOperationException("A constraint requires at least one dynamic participant.");
         if (definition.Kind == SpatialConstraintKind.Fixed && a != SpatialMotionOwner.DynamicBody && b != SpatialMotionOwner.DynamicBody)
@@ -94,6 +96,7 @@ public sealed partial class SharedSpatialPhysicsSystem
 
         SpatialMotionOwner Motion(EntityUid entity)
         {
+            entity = ResolvePhysicalOwner(entity) ?? throw new InvalidOperationException("A connection participant has no physical owner.");
             if (TryComp<SpatialBodyComponent>(entity, out var body) && body.HasDefinition)
                 return body.Definition.Owner;
             if (HasComp<SpatialGeometryComponent>(entity))
@@ -109,7 +112,7 @@ public sealed partial class SharedSpatialPhysicsSystem
             var definition = component._definition;
             if (_constraintBindings.TryGetValue(uid, out var current)
                 && !MetaData(uid).EntityPaused && SpatialPhysicsOwnership.GetMap(EntityManager, uid) == current.World
-                && _bindings.TryGetValue(definition.BodyA, out var a) && _bindings.TryGetValue(definition.BodyB, out var b)
+                && TryResolveBodyBinding(definition.BodyA, out var a, out _) && TryResolveBodyBinding(definition.BodyB, out var b, out _)
                 && a.World == current.World && b.World == current.World && a.Body == current.A && b.Body == current.B
                 && _worlds.TryGetValue(current.World, out var activeBackend) && activeBackend.HasConstraint(current.Id))
                 continue;
@@ -123,13 +126,14 @@ public sealed partial class SharedSpatialPhysicsSystem
     private ConstraintBinding? PrepareConstraint(EntityUid uid, SpatialConstraintDefinition definition)
     {
         if (MetaData(uid).EntityPaused || TerminatingOrDeleted(uid)
-            || !_bindings.TryGetValue(definition.BodyA, out var a) || !_bindings.TryGetValue(definition.BodyB, out var b)
+            || !TryResolveBodyBinding(definition.BodyA, out var a, out var relativeA)
+            || !TryResolveBodyBinding(definition.BodyB, out var b, out var relativeB) || a.Body == b.Body
             || a.World != b.World || SpatialPhysicsOwnership.GetMap(EntityManager, uid) != a.World
             || !_worlds.TryGetValue(a.World, out var backend))
             return null;
-        var dynamicA = TryComp<SpatialBodyComponent>(definition.BodyA, out var bodyA) && !a.Paused
+        var dynamicA = TryComp<SpatialBodyComponent>(a.Entity, out var bodyA) && !a.Paused
             && IsDynamicOwner(bodyA.Definition.Owner);
-        var dynamicB = TryComp<SpatialBodyComponent>(definition.BodyB, out var bodyB) && !b.Paused
+        var dynamicB = TryComp<SpatialBodyComponent>(b.Entity, out var bodyB) && !b.Paused
             && IsDynamicOwner(bodyB.Definition.Owner);
         if (!dynamicA && !dynamicB)
             return null;
@@ -137,7 +141,13 @@ public sealed partial class SharedSpatialPhysicsSystem
             && !(dynamicA && bodyA!.Definition.Owner == SpatialMotionOwner.DynamicBody)
             && !(dynamicB && bodyB!.Definition.Owner == SpatialMotionOwner.DynamicBody))
             return null;
-        var id = backend.AddConstraint(definition.ToBackend(a.Body, b.Body));
+        var resolved = definition.ToBackend(a.Body, b.Body) with
+        {
+            LocalAnchorA = relativeA.TransformPoint(definition.LocalAnchorA),
+            LocalAnchorB = relativeB.TransformPoint(definition.LocalAnchorB),
+            RelativePose = relativeA.Compose(definition.RelativePose).Compose(relativeB.Inverse())
+        };
+        var id = backend.AddConstraint(resolved);
         return new ConstraintBinding(a.World, id, a.Body, b.Body, definition);
     }
 

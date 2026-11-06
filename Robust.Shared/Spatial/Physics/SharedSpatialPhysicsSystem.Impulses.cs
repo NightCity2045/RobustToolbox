@@ -19,6 +19,13 @@ public sealed partial class SharedSpatialPhysicsSystem
     public void ApplyImpulse(Entity<SpatialBodyComponent> body, Vector3 worldImpulse, Vector3 worldPoint)
     {
         RequireServer();
+        if (body.Comp.Definition.Owner == SpatialMotionOwner.AnchoredCompoundChild)
+        {
+            if (!_compoundOwners.TryGetValue(body, out var root) || !TryComp<SpatialBodyComponent>(root, out var owner))
+                throw new InvalidOperationException("A compound impulse requires an active dynamic root.");
+            ApplyImpulse((root, owner), worldImpulse, worldPoint);
+            return;
+        }
         if (TerminatingOrDeleted(body) || !IsDynamicOwner(body.Comp.Definition.Owner)
             || !_bindings.TryGetValue(body, out var binding) || binding.Paused || MetaData(binding.World).EntityPaused)
             throw new InvalidOperationException("An impulse requires an active, unpaused dynamic body.");
@@ -39,6 +46,11 @@ public sealed partial class SharedSpatialPhysicsSystem
     {
         if (TerminatingOrDeleted(body) || !SpatialBackendBodyDefinition.Finite(worldPoint))
             throw new ArgumentException("Point velocity requires a live body and finite point.");
+        if (body.Comp.Definition.Owner == SpatialMotionOwner.AnchoredCompoundChild)
+        {
+            var root = FindCompoundRoot(body) ?? throw new InvalidOperationException("The compound child has no physical root.");
+            return TryComp<SpatialBodyComponent>(root, out var owner) ? GetVelocityAtWorldPoint((root, owner), worldPoint) : Vector3.Zero;
+        }
         var pose = _transforms.GetWorldPose(body);
         var velocity = body.Comp.LinearVelocity + Vector3.Cross(body.Comp.AngularVelocity, worldPoint - pose.Position);
         if (!SpatialBackendBodyDefinition.Finite(velocity))

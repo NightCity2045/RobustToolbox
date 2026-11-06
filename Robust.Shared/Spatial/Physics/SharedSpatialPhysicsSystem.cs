@@ -26,11 +26,12 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
 
     private readonly Dictionary<EntityUid, BepuSpatialPhysicsBackend> _worlds = new();
     private readonly Dictionary<EntityUid, Binding> _bindings = new();
+    private readonly Dictionary<EntityUid, EntityUid> _compoundOwners = new();
     private bool _committing;
     private bool _updating;
 
     private sealed record Binding(EntityUid Entity, EntityUid World, SpatialBackendBodyId Body,
-        bool Geometry, ulong GeometryRevision, bool Paused, ulong DefinitionRevision);
+        bool Geometry, ulong GeometryRevision, bool Paused, ulong DefinitionRevision, CompoundCapture? Compound = null);
 
     public override void Initialize()
     {
@@ -61,6 +62,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
             world.Dispose();
         _worlds.Clear();
         _bindings.Clear();
+        _compoundOwners.Clear();
         _constraintBindings.Clear();
         _constraintComponents.Clear();
         _semanticContacts.Clear();
@@ -192,7 +194,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
         if (!_worlds.Remove(uid, out var backend))
             return;
         foreach (var binding in _bindings.Values.Where(b => b.World == uid).ToArray())
-            _bindings.Remove(binding.Entity);
+            RemoveBinding(binding.Entity);
         backend.Dispose();
     }
 
@@ -207,21 +209,26 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
 
     private void OnBodyShutdown(EntityUid uid, SpatialBodyComponent component, ComponentShutdown args)
     {
+        _compoundOwners.TryGetValue(uid, out var root);
         RemoveConstraintsReferencing(uid);
         RemoveBinding(uid);
+        if (root.IsValid() && !TerminatingOrDeleted(root)) RefreshBinding(root);
     }
 
     private void OnGeometryStartup(EntityUid uid, SpatialGeometryComponent component, ComponentStartup args)
     {
-        if (_net.IsServer && !HasComp<SpatialBodyComponent>(uid))
+        if (_net.IsServer && (!TryComp<SpatialBodyComponent>(uid, out var body)
+            || body.HasDefinition && body.Definition.UseGeometry))
             RefreshBinding(uid);
     }
 
     private void OnGeometryShutdown(EntityUid uid, SpatialGeometryComponent component, ref SpatialGeometryStopping args)
     {
+        _compoundOwners.TryGetValue(uid, out var root);
         RemoveConstraintsReferencing(uid);
         if (_bindings.TryGetValue(uid, out var binding) && binding.Geometry)
             RemoveBinding(uid);
+        if (root.IsValid() && !TerminatingOrDeleted(root)) RefreshBinding(root);
     }
 
     private void OnMove(ref MoveEvent args)
@@ -232,6 +239,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
         // If the owner moved, independent bodies keep their solver world pose.
         // Contained bodies are dormant and continue to follow container transforms.
         var subtree = GetSubtree(root);
+        var oldRoots = CompoundOwnersOf(subtree);
         _committing = true;
         try
         {
@@ -248,6 +256,8 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
         foreach (var uid in subtree)
             if (EntityManager.EntityExists(uid))
                 RefreshBinding(uid);
+        foreach (var previousRoot in oldRoots)
+            if (!TerminatingOrDeleted(previousRoot)) RefreshBinding(previousRoot);
     }
 
     private void OnContainerInserted(EntGotInsertedIntoContainerMessage args) => RefreshSubtree(args.Entity);
@@ -267,8 +277,20 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
     {
         if (!_net.IsServer || !EntityManager.EntityExists(root))
             return;
-        foreach (var uid in GetSubtree(root))
+        var subtree = GetSubtree(root);
+        var oldRoots = CompoundOwnersOf(subtree);
+        foreach (var uid in subtree)
             RefreshBinding(uid);
+        foreach (var previousRoot in oldRoots)
+            if (!TerminatingOrDeleted(previousRoot)) RefreshBinding(previousRoot);
+    }
+
+    private HashSet<EntityUid> CompoundOwnersOf(IEnumerable<EntityUid> entities)
+    {
+        var owners = new HashSet<EntityUid>();
+        foreach (var uid in entities)
+            if (_compoundOwners.TryGetValue(uid, out var root)) owners.Add(root);
+        return owners;
     }
 
     private List<EntityUid> GetSubtree(EntityUid root)
@@ -301,6 +323,12 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
             return;
         if (hasBody && body!.LifeStage < ComponentLifeStage.Initialized)
             return;
+        if (hasBody && body!.Definition.Owner == SpatialMotionOwner.AnchoredCompoundChild)
+        {
+            RemoveBinding(uid);
+            if (FindCompoundRoot(uid) is { } root) RefreshBinding(root);
+            return;
+        }
         var map = SpatialPhysicsOwnership.GetMap(EntityManager, uid);
         if (map == null)
         {
@@ -325,7 +353,8 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
         var state = new SpatialBackendState(_transforms.GetWorldPose(uid), paused ? Vector3.Zero : linear,
             paused ? Vector3.Zero : angular);
         if (_bindings.TryGetValue(uid, out var existing) && existing.World == map && existing.DefinitionRevision == definitionRevision
-            && (!hasGeometry || existing.GeometryRevision == Comp<SpatialGeometryComponent>(uid).Revision))
+            && (!hasGeometry || existing.GeometryRevision == Comp<SpatialGeometryComponent>(uid).Revision)
+            && (existing.Compound == null || CompoundStillCurrent(existing.Compound)))
         {
             if (existing.Paused != paused)
             {
@@ -339,7 +368,9 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
             return;
         }
 
-        var backendDefinition = BuildBackendDefinition(uid, definition, definitionRevision, out var revision);
+        var compound = CaptureCompound(uid, definition, definitionRevision);
+        var backendDefinition = compound.Definition;
+        var revision = hasGeometry ? Comp<SpatialGeometryComponent>(uid).Revision : 0;
         if (backendDefinition == null)
         {
             RemoveBinding(uid);
@@ -349,7 +380,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
         if (paused && IsDynamicOwner(definition.Owner))
             backend.SetPaused(id, true);
         RemoveBinding(uid);
-        _bindings.Add(uid, new Binding(uid, map.Value, id, definition.UseGeometry, revision, paused, definitionRevision));
+        InstallBinding(new Binding(uid, map.Value, id, definition.UseGeometry, revision, paused, definitionRevision, compound));
     }
 
     private void ValidateGeometryOwnership(EntityUid uid, SpatialBodyDefinition definition)
@@ -400,8 +431,23 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
 
     private void RemoveBinding(EntityUid uid)
     {
-        if (_bindings.Remove(uid, out var binding) && _worlds.TryGetValue(binding.World, out var backend))
-            backend.RemoveBody(binding.Body);
+        if (!_bindings.Remove(uid, out var binding)) return;
+        if (binding.Compound != null)
+            foreach (var member in binding.Compound.Members)
+                if (_compoundOwners.TryGetValue(member.Entity, out var root) && root == uid) _compoundOwners.Remove(member.Entity);
+        if (_worlds.TryGetValue(binding.World, out var backend)) backend.RemoveBody(binding.Body);
+    }
+
+    private void InstallBinding(Binding binding)
+    {
+        RemoveBinding(binding.Entity);
+        if (binding.Compound is { } compound)
+        {
+            binding = binding with { Compound = WithCommittedCompoundVersions(compound) };
+            foreach (var member in compound.Members)
+                if (member.Entity != binding.Entity) _compoundOwners[member.Entity] = binding.Entity;
+        }
+        _bindings.Add(binding.Entity, binding);
     }
 
     private void ValidateDefinition(EntityUid uid, SpatialBodyDefinition definition, Vector3 linear, Vector3 angular)
@@ -413,7 +459,16 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
         if (IsDynamicOwner(definition.Owner) && (Transform(uid).NoLocalRotation || Transform(uid).Anchored))
             throw new InvalidOperationException("Dynamic spatial motion requires physics-owned rotation and compound-aware anchoring.");
         if (definition.Owner == SpatialMotionOwner.AnchoredCompoundChild)
-            throw new InvalidOperationException("This movement owner requires its motor or compound-attachment integration.");
+        {
+            if (linear != Vector3.Zero || angular != Vector3.Zero)
+                throw new InvalidOperationException("A compound child derives velocity from its root and cannot own independent motion.");
+            if (_net.IsServer)
+            {
+                var root = FindCompoundRoot(uid) ?? throw new InvalidOperationException("A compound child requires a physical ancestor.");
+                if (TryComp<SpatialBodyComponent>(root, out var rootBody) && rootBody.Definition.Owner == SpatialMotionOwner.Motor)
+                    throw new InvalidOperationException("A capsule motor cannot own structural compound children.");
+            }
+        }
         if (definition.Owner == SpatialMotionOwner.Motor)
             ValidateMotorBody(uid, definition, angular);
         if (!SpatialBackendBodyDefinition.Finite(linear) || !SpatialBackendBodyDefinition.Finite(angular)
@@ -429,7 +484,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
         return found;
     }
     internal int GetBodyCount(EntityUid world) => _worlds[world].BodyCount;
-    internal bool HasActiveCollision(EntityUid entity) => _bindings.ContainsKey(entity);
+    internal bool HasActiveCollision(EntityUid entity) => _bindings.ContainsKey(entity) || _compoundOwners.ContainsKey(entity);
 
     private void RequireServer()
     {

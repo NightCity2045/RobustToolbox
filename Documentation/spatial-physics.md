@@ -17,8 +17,8 @@ engine-neutral values, separate from content prototype/material identifiers.
 Kinematic velocity integration alone does not implement safe door/platform motion;
 the controller must supply checked movement through spatial queries and apply
 content's explicit obstruction policy. The ECS activation path accepts Static,
-DynamicBody and Motor owners. AnchoredCompoundChild still requires its compound
-attachment integration and fails explicitly if activated prematurely.
+DynamicBody, Motor and AnchoredCompoundChild owners. Anchored children require a
+physical ancestor and share its backend body; see [spatial-compounds.md](spatial-compounds.md).
 
 Dynamic compounds are recentered for correct inertia. The adapter converts poses
 and linear velocities at the canonical entity origin to/from the backend center

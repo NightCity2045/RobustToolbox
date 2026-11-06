@@ -7,11 +7,11 @@ namespace Robust.Shared.Spatial.Physics;
 
 internal sealed partial class BepuSpatialPhysicsBackend
 {
-    private bool MotorCollides(Entry motor, SpatialBackendBodyId other)
+    private bool MotorCollides(Entry motor, SpatialBackendBodyId other, SpatialBackendPart part)
     {
         var target = _entries[other].Definition;
-        return (motor.Definition.CollisionLayer & target.CollisionMask) != 0
-            && (target.CollisionLayer & motor.Definition.CollisionMask) != 0
+        return (motor.Definition.CollisionLayer & (part.CollisionMask ?? target.CollisionMask)) != 0
+            && ((part.CollisionLayer ?? target.CollisionLayer) & motor.Definition.CollisionMask) != 0
             && !_disabledContactPairs.ContainsKey(ContactPair(motor.Id, other));
     }
 
@@ -33,7 +33,7 @@ internal sealed partial class BepuSpatialPhysicsBackend
         SpatialBackendMotorSupport? closest = null;
         foreach (var hit in ShapeCast(part.Shape, start, -up * distance, default, entry.Definition.CollisionMask, id))
         {
-            if (!MotorCollides(entry, hit.Body) || hit.Normal is not { } normal || hit.Point is not { } point
+            if (!MotorCollides(entry, hit.Body, hit.Source) || hit.Normal is not { } normal || hit.Point is not { } point
                 || Vector3.Dot(normal, up) < MathF.Cos(settings.MaximumSlope))
                 continue;
             var gap = hit.Fraction * distance - lift;
@@ -45,7 +45,7 @@ internal sealed partial class BepuSpatialPhysicsBackend
         if (closest == null)
             foreach (var overlap in OverlapContacts(part.Shape, pose, entry.Definition.CollisionMask, id))
             {
-                if (!MotorCollides(entry, overlap.Body))
+                if (!MotorCollides(entry, overlap.Body, overlap.Source))
                     continue;
                 foreach (var contact in overlap.Contacts)
                     if (Vector3.Dot(contact.Normal, up) >= MathF.Cos(settings.MaximumSlope)
@@ -154,7 +154,7 @@ internal sealed partial class BepuSpatialPhysicsBackend
         var down = -up * (settings.StepHeight + settings.SupportDistance);
         foreach (var hit in ShapeCast(part.Shape, landingStart, down, default, entry.Definition.CollisionMask, entry.Id))
         {
-            if (!MotorCollides(entry, hit.Body))
+            if (!MotorCollides(entry, hit.Body, hit.Source))
                 continue;
             // The first physical obstruction must be a walkable landing.
             if (hit.Normal is not { } normal || Vector3.Dot(normal, up) < MathF.Cos(settings.MaximumSlope))
@@ -176,7 +176,7 @@ internal sealed partial class BepuSpatialPhysicsBackend
             ? OverlapContacts(part.Shape, pose, entry.Definition.CollisionMask, entry.Id) : null;
         foreach (var hit in hits)
         {
-            if (!MotorCollides(entry, hit.Body))
+            if (!MotorCollides(entry, hit.Body, hit.Source))
                 continue;
             if (hit.Normal is { } normal)
             {
@@ -208,7 +208,7 @@ internal sealed partial class BepuSpatialPhysicsBackend
         var envelope = new SpatialCapsule(capsule.Radius + settings.ContactTolerance, capsule.Length);
         foreach (var overlap in OverlapContacts(envelope, pose, entry.Definition.CollisionMask, entry.Id))
         {
-            if (!MotorCollides(entry, overlap.Body))
+            if (!MotorCollides(entry, overlap.Body, overlap.Source))
                 continue;
             foreach (var contact in overlap.Contacts)
             {
@@ -234,7 +234,7 @@ internal sealed partial class BepuSpatialPhysicsBackend
         const float epsilon = 1e-5f;
         foreach (var overlap in next)
         {
-            if (!MotorCollides(entry, overlap.Body))
+            if (!MotorCollides(entry, overlap.Body, overlap.Source))
                 continue;
             var previous = existing.FirstOrDefault(o => o.Body == overlap.Body && o.ChildIndex == overlap.ChildIndex);
             foreach (var contact in overlap.Contacts)

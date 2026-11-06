@@ -354,10 +354,14 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
         public bool AllowTest(CollidableReference collidable)
         {
             var entry = owner.GetEntry(collidable);
-            return entry.Id != ignored && (entry.Definition.CollisionLayer & mask) != 0;
+            return entry.Id != ignored && (entry.Definition.CollisionLayerUnion & mask) != 0;
         }
         public bool AllowTest(CollidableReference collidable, int childIndex)
-            => filter?.Invoke(owner.GetEntry(collidable).Definition.Parts[childIndex]) ?? true;
+        {
+            var definition = owner.GetEntry(collidable).Definition;
+            var part = definition.Parts[childIndex];
+            return ((part.CollisionLayer ?? definition.CollisionLayer) & mask) != 0 && (filter?.Invoke(part) ?? true);
+        }
         public void OnRayHit(in RayData ray, ref float maximumT, float t, in Vector3 normal,
             CollidableReference collidable, int childIndex)
         {
@@ -392,9 +396,18 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
                 return false;
             var first = owner.GetEntry(a).Definition;
             var second = owner.GetEntry(b).Definition;
-            return (first.CollisionLayer & second.CollisionMask) != 0 && (second.CollisionLayer & first.CollisionMask) != 0;
+            return (first.CollisionLayerUnion & second.CollisionMaskUnion) != 0
+                && (second.CollisionLayerUnion & first.CollisionMaskUnion) != 0;
         }
-        public bool AllowContactGeneration(int worker, CollidablePair pair, int a, int b) => true;
+        public bool AllowContactGeneration(int worker, CollidablePair pair, int a, int b)
+        {
+            var first = owner.GetEntry(pair.A).Definition;
+            var second = owner.GetEntry(pair.B).Definition;
+            var partA = first.Parts[a];
+            var partB = second.Parts[b];
+            return ((partA.CollisionLayer ?? first.CollisionLayer) & (partB.CollisionMask ?? second.CollisionMask)) != 0
+                && ((partB.CollisionLayer ?? second.CollisionLayer) & (partA.CollisionMask ?? first.CollisionMask)) != 0;
+        }
         public bool ConfigureContactManifold<T>(int worker, CollidablePair pair, ref T manifold,
             out PairMaterialProperties material) where T : unmanaged, IContactManifold<T>
         {

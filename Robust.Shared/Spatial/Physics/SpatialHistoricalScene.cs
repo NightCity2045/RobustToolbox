@@ -51,10 +51,19 @@ public sealed class SpatialHistoricalScene : ISpatialQueryService
     {
         foreach (var body in Bodies)
         {
-            if (body.Entity != entity) continue;
-            state = new SpatialHistoricalBodyState(body.State.Pose, body.State.LinearVelocity, body.State.AngularVelocity,
-                body.DefinitionRevision);
-            return true;
+            if (body.Entity == entity)
+            {
+                state = new SpatialHistoricalBodyState(body.State.Pose, body.State.LinearVelocity, body.State.AngularVelocity,
+                    body.DefinitionRevision);
+                return true;
+            }
+            foreach (var member in body.AnchoredMembers)
+            {
+                if (member.Key != entity || !Poses.TryGetValue(entity, out var pose)) continue;
+                state = new SpatialHistoricalBodyState(pose, body.State.LinearVelocity
+                    + Vector3.Cross(body.State.AngularVelocity, pose.Position - body.State.Pose.Position), body.State.AngularVelocity, member.Value);
+                return true;
+            }
         }
         state = default;
         return false;

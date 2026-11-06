@@ -19,7 +19,7 @@ internal sealed record SpatialCapsule(float Radius, float Length) : SpatialConve
 
 internal readonly record struct SpatialBackendPart(SpatialConvexShape Shape, RigidTransform3 LocalPose,
     EntityUid? Entity = null, SpatialSurfaceReference? Surface = null, ulong Revision = 0, float MassWeight = 1,
-    string MaterialProfile = "");
+    string MaterialProfile = "", uint? CollisionLayer = null, uint? CollisionMask = null);
 
 internal readonly record struct SpatialBackendMaterial(float Friction, float RecoveryVelocity, float SpringFrequency, float Damping)
 {
@@ -41,6 +41,8 @@ internal sealed class SpatialBackendBodyDefinition
     public SpatialBackendMaterial Material { get; }
     public uint CollisionLayer { get; }
     public uint CollisionMask { get; }
+    public uint CollisionLayerUnion { get; }
+    public uint CollisionMaskUnion { get; }
     public bool LockRotation { get; }
 
     public SpatialBackendBodyDefinition(SpatialBackendMotion motion, IEnumerable<SpatialBackendPart> parts,
@@ -70,6 +72,11 @@ internal sealed class SpatialBackendBodyDefinition
         Material.Validate();
         CollisionLayer = collisionLayer;
         CollisionMask = collisionMask;
+        foreach (var part in copy)
+        {
+            CollisionLayerUnion |= part.CollisionLayer ?? collisionLayer;
+            CollisionMaskUnion |= part.CollisionMask ?? collisionMask;
+        }
         LockRotation = lockRotation;
     }
 

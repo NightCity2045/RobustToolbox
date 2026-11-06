@@ -15,6 +15,31 @@ internal static class SpatialPhysicsOwnership
     private static bool HasRegistered<T>(IEntityManager entities, EntityUid uid) where T : Component, new()
         => entities.ComponentFactory.TryGetRegistration<T>(out _) && entities.HasComponent<T>(uid);
 
+    internal static EntityUid? FindCompoundRoot(IEntityManager entities, EntityUid child)
+    {
+        for (var ancestor = entities.GetComponent<TransformComponent>(child).ParentUid; ancestor.IsValid();
+             ancestor = entities.GetComponent<TransformComponent>(ancestor).ParentUid)
+        {
+            if (HasRegistered<SpatialBodyComponent>(entities, ancestor))
+            {
+                var body = entities.GetComponent<SpatialBodyComponent>(ancestor);
+                if (!body.HasDefinition) return null;
+                if (body.Definition.Owner == SpatialMotionOwner.AnchoredCompoundChild) continue;
+                return ancestor;
+            }
+            if (HasRegistered<SpatialGeometryComponent>(entities, ancestor)) return ancestor;
+        }
+        return null;
+    }
+
+    internal static EntityUid? GetAnchoredRoot(IEntityManager entities, EntityUid child)
+    {
+        if (!HasRegistered<SpatialBodyComponent>(entities, child)) return null;
+        var body = entities.GetComponent<SpatialBodyComponent>(child);
+        if (!body.HasDefinition || body.Definition.Owner != SpatialMotionOwner.AnchoredCompoundChild) return null;
+        return FindCompoundRoot(entities, child);
+    }
+
     internal static EntityUid? GetMap(IEntityManager entities, EntityUid uid)
     {
         EntityUid? map = null;
@@ -44,23 +69,56 @@ internal static class SpatialPhysicsOwnership
         ValidateSubtree(entities, root, spatial);
         if (!spatial)
             return;
-        var physicalParent = false;
+        SpatialMotionOwner? physicalParent = null;
+        var explicitParent = false;
         for (var ancestor = parent; ancestor.IsValid(); ancestor = entities.GetComponent<TransformComponent>(ancestor).ParentUid)
-            physicalParent |= HasRegistered<SpatialBodyComponent>(entities, ancestor);
-        var pending = new Stack<(EntityUid Entity, bool PhysicalParent)>();
-        pending.Push((root, physicalParent));
+        {
+            if (HasRegistered<SpatialBodyComponent>(entities, ancestor)
+                && entities.TryGetComponent<SpatialBodyComponent>(ancestor, out var ancestorBody) && ancestorBody.HasDefinition)
+            {
+                if (ancestorBody.Definition.Owner == SpatialMotionOwner.AnchoredCompoundChild) continue;
+                physicalParent = ancestorBody.Definition.Owner;
+                explicitParent = true;
+                break;
+            }
+            if (HasRegistered<SpatialGeometryComponent>(entities, ancestor))
+            {
+                physicalParent = SpatialMotionOwner.Static;
+                break;
+            }
+        }
+        var pending = new Stack<(EntityUid Entity, SpatialMotionOwner? PhysicalParent, bool ExplicitParent)>();
+        pending.Push((root, physicalParent, explicitParent));
         while (pending.TryPop(out var item))
         {
-            var (uid, owned) = item;
+            var (uid, owner, explicitOwner) = item;
             SpatialBodyComponent? body = null;
             var hasBody = HasRegistered<SpatialBodyComponent>(entities, uid)
                 && entities.TryGetComponent(uid, out body) && body.HasDefinition;
-            if (owned && (hasBody && body!.Definition.Owner == SpatialMotionOwner.Static
+            if (explicitOwner && (hasBody && body!.Definition.Owner == SpatialMotionOwner.Static
                 || !hasBody && HasRegistered<SpatialGeometryComponent>(entities, uid)))
                 throw new InvalidOperationException("Attached structural geometry requires compound ownership, not an independent static body.");
+            if (hasBody)
+            {
+                if (body!.Definition.Owner == SpatialMotionOwner.AnchoredCompoundChild)
+                {
+                    if (owner == null || owner == SpatialMotionOwner.Motor)
+                        throw new InvalidOperationException("A structural compound child requires a non-motor physical ancestor.");
+                }
+                else
+                {
+                    owner = body.Definition.Owner;
+                    explicitOwner = true;
+                }
+            }
+            else if (HasRegistered<SpatialGeometryComponent>(entities, uid))
+            {
+                owner = SpatialMotionOwner.Static;
+                explicitOwner = false;
+            }
             using var children = entities.GetComponent<TransformComponent>(uid).ChildEnumerator;
             while (children.MoveNext(out var child))
-                pending.Push((child, owned || hasBody));
+                pending.Push((child, owner, explicitOwner));
         }
     }
 

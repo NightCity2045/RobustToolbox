@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Numerics;
 using Robust.Shared.GameObjects;
 
@@ -6,30 +8,49 @@ namespace Robust.Shared.Spatial.Physics;
 
 public sealed partial class SharedSpatialPhysicsSystem
 {
-    internal PreparedGeometryBody? PrepareGeometryBody(EntityUid uid, EntityUid world, SpatialGeometrySnapshot after, bool unchanged)
+    internal IReadOnlyList<PreparedGeometryBody> PrepareGeometryBodies(EntityUid world, IReadOnlyList<SpatialGeometryChange> changes)
     {
         RequireServer();
         if (!_worlds.TryGetValue(world, out var backend))
         {
             if (HasComp<SpatialPhysicsWorldComponent>(world))
                 throw new InvalidOperationException("The spatial physics world is not ready for an edit.");
-            return null;
+            return Array.Empty<PreparedGeometryBody>();
         }
-        TryComp<SpatialBodyComponent>(uid, out var body);
-        var definition = body?.Definition ?? new SpatialBodyDefinition(SpatialMotionOwner.Static, useGeometry: true);
-        ValidateGeometryOwnership(uid, definition);
-        var revision = body?.DefinitionRevision ?? 0;
-        var replacement = unchanged ? null : BuildBackendDefinition(uid, definition, revision, out _, after);
-        var prepared = replacement == null ? null : backend.PrepareBody(replacement);
-        var result = new PreparedGeometryBody(this, uid, world, backend, body, revision, after.Revision, prepared, unchanged);
+        var snapshots = changes.ToDictionary(change => change.After.OwnerFrame, change => change.After);
+        var roots = changes.GroupBy(change =>
+        {
+            var frame = change.After.OwnerFrame;
+            return TryComp<SpatialBodyComponent>(frame, out var body) && body.Definition.Owner == SpatialMotionOwner.AnchoredCompoundChild
+                ? FindCompoundRoot(frame) ?? throw new InvalidOperationException("Edited compound geometry has no physical root.") : frame;
+        });
+        var result = new List<PreparedGeometryBody>();
         try
         {
-            result.Validate();
+            foreach (var group in roots)
+            {
+                var uid = group.Key;
+                TryComp<SpatialBodyComponent>(uid, out var body);
+                var definition = body?.Definition ?? new SpatialBodyDefinition(SpatialMotionOwner.Static, useGeometry: true);
+                ValidateGeometryOwnership(uid, definition);
+                var revision = body?.DefinitionRevision ?? 0;
+                // All changed child frames are supplied together. One root gets
+                // exactly one prepared replacement, never competing partial hulls.
+                var compound = CaptureCompound(uid, definition, revision, snapshots);
+                var unchanged = group.All(change => change.Surfaces.Count == 0);
+                var replacement = unchanged ? null : compound.Definition;
+                var prepared = replacement == null ? null : backend.PrepareBody(replacement);
+                var geometryRevision = snapshots.TryGetValue(uid, out var after) ? after.Revision
+                    : TryComp<SpatialGeometryComponent>(uid, out var geometry) ? geometry.Revision : 0;
+                var item = new PreparedGeometryBody(this, uid, world, backend, body, revision, geometryRevision, prepared, unchanged, compound);
+                result.Add(item);
+                item.Validate();
+            }
             return result;
         }
         catch
         {
-            result.Dispose();
+            foreach (var item in result) item.Dispose();
             throw;
         }
     }
@@ -37,7 +58,7 @@ public sealed partial class SharedSpatialPhysicsSystem
     /// <summary>Transaction-owned shapes. No public solver handle or canonical mutation during preparation.</summary>
     internal sealed class PreparedGeometryBody(SharedSpatialPhysicsSystem owner, EntityUid entity, EntityUid world,
         BepuSpatialPhysicsBackend backend, SpatialBodyComponent? expectedBody, ulong definitionRevision,
-        ulong geometryRevision, BepuSpatialPhysicsBackend.PreparedBody? prepared, bool unchanged) : IDisposable
+        ulong geometryRevision, BepuSpatialPhysicsBackend.PreparedBody? prepared, bool unchanged, CompoundCapture compound) : IDisposable
     {
         private Binding? _replacement;
         private SpatialBackendState _state;
@@ -56,6 +77,8 @@ public sealed partial class SharedSpatialPhysicsSystem
             owner.TryComp<SpatialBodyComponent>(entity, out var body);
             if (!ReferenceEquals(body, expectedBody) || body != null && (!body.Running || body.DefinitionRevision != definitionRevision))
                 throw new InvalidOperationException("The physical definition changed after geometry preparation.");
+            if (!owner.CompoundStillCurrent(compound))
+                throw new InvalidOperationException("Compound membership, relative pose or a participant changed after geometry preparation.");
             var definition = body?.Definition ?? new SpatialBodyDefinition(SpatialMotionOwner.Static, useGeometry: true);
             var linear = body?.LinearVelocity ?? Vector3.Zero;
             var angular = body?.AngularVelocity ?? Vector3.Zero;
@@ -76,7 +99,8 @@ public sealed partial class SharedSpatialPhysicsSystem
             if (!_insert || prepared == null)
                 return;
             var id = prepared.Commit(_state);
-            _replacement = new Binding(entity, world, id, true, geometryRevision, _paused, definitionRevision);
+            _replacement = new Binding(entity, world, id, expectedBody?.Definition.UseGeometry ?? true,
+                geometryRevision, _paused, definitionRevision, compound);
             if (_paused && expectedBody != null && IsDynamicOwner(expectedBody.Definition.Owner))
                 backend.SetPaused(id, true);
         }
@@ -86,13 +110,17 @@ public sealed partial class SharedSpatialPhysicsSystem
             if (unchanged)
             {
                 if (owner._bindings.TryGetValue(entity, out var current))
-                    owner._bindings[entity] = current with { GeometryRevision = geometryRevision };
+                    owner._bindings[entity] = current with
+                    {
+                        GeometryRevision = geometryRevision,
+                        Compound = WithCommittedCompoundVersions(compound)
+                    };
                 _installed = true;
                 return;
             }
             owner.RemoveBinding(entity);
             if (_replacement != null)
-                owner._bindings.Add(entity, _replacement);
+                owner.InstallBinding(_replacement);
             _installed = true;
         }
 

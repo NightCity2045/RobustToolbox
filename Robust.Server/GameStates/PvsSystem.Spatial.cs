@@ -123,7 +123,8 @@ internal sealed partial class PvsSystem
         // camera parented to a vehicle, use the first body's point velocity once.
         while (_xformQuery.TryGetComponent(viewer, out var transform))
         {
-            if (TryComp<SpatialBodyComponent>(viewer, out var body))
+            if (TryComp<SpatialBodyComponent>(viewer, out var body) && body.HasDefinition
+                && body.Definition.Owner != SpatialMotionOwner.AnchoredCompoundChild)
             {
                 var velocity = body.LinearVelocity + Vector3.Cross(body.AngularVelocity,
                     position - _transform.GetWorldPose(transform).Position);

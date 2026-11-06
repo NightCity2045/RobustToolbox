@@ -10,6 +10,7 @@ using Robust.Shared.Map;
 using Robust.Shared.Map.Components;
 using Robust.Shared.Maths;
 using Robust.Shared.Physics;
+using Robust.Shared.Spatial.Physics;
 using Robust.Shared.Utility;
 
 namespace Robust.Shared.GameObjects;
@@ -1880,6 +1881,7 @@ public abstract partial class SharedTransformSystem
     #region AttachToGridOrMap
     /// <summary>
     /// Attempts to re-parent the given entity to the grid or map that the entity is on.
+    /// A spatial compound part instead retains its existing physical root.
     /// If no valid map or grid is found, this will detach the entity to null-space and queue it for deletion.
     /// </summary>
     public void AttachToGridOrMap(EntityUid uid, TransformComponent? xform = null)
@@ -1894,6 +1896,15 @@ public abstract partial class SharedTransformSystem
 
         if (!xform.ParentUid.IsValid())
             return;
+
+        // Leaving a container does not release structural ownership. Preserve
+        // the existing physical root and full pose, rather than selecting a
+        // planar grid/map which cannot own this compound part.
+        if (SpatialPhysicsOwnership.GetAnchoredRoot(EntityManager, uid) is { } root)
+        {
+            SetParent(uid, xform, root);
+            return;
+        }
 
         if (xform.ParentUid == xform.GridUid)
             return;

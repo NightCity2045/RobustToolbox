@@ -155,12 +155,22 @@ public sealed class SpatialPhysicsPersistenceTest : RobustIntegrationTest
         NetEntity bodyNet = default;
         NetEntity secondBodyNet = default;
         NetEntity constraintNet = default;
+        EntityUid part = default;
+        NetEntity partNet = default;
         var settings = new SpatialPhysicsSettings(Vector3.Zero, 1, 8);
         await server.WaitAssertion(() =>
         {
             world = server.System<SharedSpatialSystem>().CreateWorld();
             server.System<SharedSpatialPhysicsSystem>().EnablePhysics(world, settings);
             body = SpatialPhysicsTests.SpawnBody(server.EntMan, world, new Vector3(0, 0, 3), Vector3.UnitX);
+            part = server.EntMan.CreateEntityUninitialized(null, body,
+                new RigidTransform3(Vector3.UnitY * -2, Quaternion.Identity));
+            var partComponent = server.EntMan.AddComponent<SpatialBodyComponent>(part);
+            server.System<SharedSpatialPhysicsSystem>().ConfigureInitialBody((part, partComponent),
+                new SpatialBodyDefinition(SpatialMotionOwner.AnchoredCompoundChild,
+                    new[] { new SpatialColliderDefinition(new SpatialSphereShape(0.25f), RigidTransform3.Identity) }, mass: 2));
+            server.EntMan.InitializeAndStartEntity(part);
+            partNet = server.EntMan.GetNetEntity(part);
             var component = server.EntMan.GetComponent<SpatialBodyComponent>(body);
             server.System<SharedSpatialPhysicsSystem>().ReconfigureBody((body, component), component.Definition,
                 0, Vector3.UnitX, Vector3.Zero);
@@ -196,6 +206,13 @@ public sealed class SpatialPhysicsPersistenceTest : RobustIntegrationTest
             Assert.That(entities.GetComponent<SpatialPhysicsWorldComponent>(localWorld).Settings, Is.EqualTo(settings));
             Assert.That(component.Definition.Colliders.Single().Shape, Is.TypeOf<SpatialSphereShape>());
             Assert.That(component.LinearVelocity, Is.EqualTo(Vector3.UnitX));
+            var localPart = entities.GetEntity(partNet);
+            var partBody = entities.GetComponent<SpatialBodyComponent>(localPart);
+            Assert.That(partBody.Definition.Owner, Is.EqualTo(SpatialMotionOwner.AnchoredCompoundChild));
+            Assert.That(partBody.Definition.Mass, Is.EqualTo(2));
+            Assert.That(partBody.LinearVelocity, Is.EqualTo(Vector3.Zero));
+            Assert.That(entities.GetComponent<TransformComponent>(localPart).ParentUid, Is.EqualTo(localBody));
+            Assert.That(entities.GetComponent<TransformComponent>(localPart).LocalPose.Position, Is.EqualTo(Vector3.UnitY * -2));
             var before = client.System<SharedTransformSystem>().GetWorldPose(localBody);
             Assert.That(before.Position.Z, Is.EqualTo(3));
             Assert.That(before.Position.X, Is.GreaterThan(0));
@@ -213,6 +230,13 @@ public sealed class SpatialPhysicsPersistenceTest : RobustIntegrationTest
             Assert.Throws<InvalidOperationException>(() => physics.SetConstraint((localConstraint, constraint), constraint.Definition));
             physics.Update(1);
             Assert.That(client.System<SharedTransformSystem>().GetWorldPose(localBody), Is.EqualTo(before));
+        });
+        await server.WaitPost(() => server.EntMan.DeleteEntity(part));
+        await RunTicksSync(server, client, 20);
+        await client.WaitAssertion(() =>
+        {
+            Assert.That(client.EntMan.TryGetEntity(partNet, out _), Is.False);
+            Assert.That(client.EntMan.EntityExists(client.EntMan.GetEntity(bodyNet)), Is.True);
         });
         await server.WaitPost(() => server.EntMan.DeleteEntity(world));
         await RunTicksSync(server, client, 20);

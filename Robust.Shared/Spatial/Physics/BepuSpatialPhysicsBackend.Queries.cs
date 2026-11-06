@@ -73,6 +73,8 @@ internal sealed partial class BepuSpatialPhysicsBackend
             compound.Tree.GetOverlaps(center - extent, center + extent, ref children);
             foreach (var index in children.Indices)
             {
+                if (((entry.Definition.Parts[index].CollisionLayer ?? entry.Definition.CollisionLayer) & mask) == 0)
+                    continue;
                 ref var child = ref compound.Children[index];
                 _simulation.Shapes[child.ShapeIndex.Type].GetShapeData(child.ShapeIndex.Index, out var data, out _);
                 var targetPosition = bodyPose.Position + Vector3.Transform(child.LocalPose.Position, bodyPose.Orientation);
@@ -101,7 +103,7 @@ internal sealed partial class BepuSpatialPhysicsBackend
         public bool LoopBody(CollidableReference reference)
         {
             var entry = owner.GetEntry(reference);
-            if (entry.Id != ignored && (entry.Definition.CollisionLayer & mask) != 0)
+            if (entry.Id != ignored && (entry.Definition.CollisionLayerUnion & mask) != 0)
                 Entries.Add(entry);
             return true;
         }

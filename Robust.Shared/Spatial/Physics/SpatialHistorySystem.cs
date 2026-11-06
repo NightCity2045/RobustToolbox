@@ -124,12 +124,19 @@ public sealed partial class SpatialHistorySystem : EntitySystem
                     if (part.Entity is { } source && !AddPose(source))
                     { gap = "A collision source is unavailable or exceeds the history pose budget."; break; }
                 if (gap != null) break;
-                if (!body.Geometry) continue;
-                var component = Comp<SpatialGeometryComponent>(body.Entity);
-                var snapshot = previous != null && previous.Geometries.TryGetValue(body.Entity, out var old)
-                    && old.CaptureIdentity == component.CaptureIdentity && old.Revision == component.Revision
-                    ? old : _geometry.CaptureSnapshot(body.Entity);
-                geometry.Add(body.Entity, snapshot);
+                foreach (var member in body.AnchoredMembers)
+                    if (!AddPose(member.Key)) { gap = "A compound member exceeds the history pose budget."; break; }
+                if (gap != null) break;
+                foreach (var frame in body.GeometryFrames)
+                {
+                    if (!AddPose(frame)) { gap = "A geometry frame exceeds the history pose budget."; break; }
+                    var component = Comp<SpatialGeometryComponent>(frame);
+                    var snapshot = previous != null && previous.Geometries.TryGetValue(frame, out var old)
+                        && old.CaptureIdentity == component.CaptureIdentity && old.Revision == component.Revision
+                        ? old : _geometry.CaptureSnapshot(frame);
+                    geometry.Add(frame, snapshot);
+                }
+                if (gap != null) break;
             }
             if (!AddPose(world)) gap ??= "The world frame exceeds the history pose budget.";
             if (previousAtTick != null) Evict(history, previousAtTick);

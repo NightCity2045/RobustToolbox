@@ -25,6 +25,8 @@ Tests exercise truncated/legacy stamps, schema/backend mismatch, both sides of
 actual UDP handshakes and a matching connection through the real socket transport
 and mapped-string serializer. They do not use the integration transport shortcut
 for these handshake checks. Wire revision 2 adds the frame lifetime/revision stamp
-and acknowledged semantic geometry transport; see
+and acknowledged semantic geometry transport; revision 3 enables anchored compound
+ownership and its root-derived motion semantics on both peers. Older peers reject
+the connection before receiving an unsupported motion owner. See
 [spatial-streaming.md](spatial-streaming.md). Local prediction and history remain
 separate integrations.
