@@ -85,11 +85,11 @@ public sealed partial class SpatialGeometryStreamingSystem : EntitySystem
         if (message.MsgChannel != _net.ServerChannel) return;
         try
         {
-            if (_replica.AddFragment(message.Sequence, message.Frame, message.Offset, message.Data))
+            if (_replica.AddFragment(message.Sequence, message.Frame, message.Offset, message.Data, message.Part))
             {
                 _pendingSince = _timing.RealTime;
                 _net.ClientSendMessage(new MsgSpatialGeometryProgress
-                    { Sequence = message.Sequence, Frame = message.Frame, Offset = message.Offset });
+                    { Sequence = message.Sequence, Frame = message.Frame, Part = message.Part, Offset = message.Offset });
             }
         }
         catch { RequestBaseline(); throw; }

@@ -15,10 +15,10 @@ namespace Robust.Shared.Spatial.Networking;
 /// resulting detached snapshot has no live capture identity and grants no edits.
 /// Transport generation, world, tick and baseline ordering belong to the envelope.
 /// </summary>
-internal static class SpatialGeometryWireCodec
+internal static partial class SpatialGeometryWireCodec
 {
     private const uint Magic = 0x53474731;
-    internal const uint Version = 1;
+    internal const uint Version = 2;
     internal const int MaximumBytes = 8 * 1024 * 1024;
     private const int MaximumRecords = 16384;
     private const int MaximumStringBytes = 4096;
@@ -44,6 +44,12 @@ internal static class SpatialGeometryWireCodec
     }
 
     internal static byte[] Encode(SpatialGeometrySnapshot snapshot, Func<EntityUid, NetEntity> getNetEntity)
+    {
+        try { return EncodeCore(snapshot, getNetEntity); }
+        catch (PayloadBudgetExceeded e) { throw new InvalidDataException(e.Message, e); }
+    }
+
+    private static byte[] EncodeCore(SpatialGeometrySnapshot snapshot, Func<EntityUid, NetEntity> getNetEntity)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         ArgumentNullException.ThrowIfNull(getNetEntity);
@@ -88,7 +94,7 @@ internal static class SpatialGeometryWireCodec
             Reference(boundary.Entity);
             writer.Write(boundary.StateRevision);
             Text(boundary.MaterialProfile);
-            PartitionBudget(boundary.Openings.Count, ref work);
+            EncodingPartitionBudget(boundary.Openings.Count, ref work);
             Count(boundary.Openings.Count);
             foreach (var opening in boundary.Openings)
             {
@@ -108,7 +114,7 @@ internal static class SpatialGeometryWireCodec
             Reference(slab.Entity);
             writer.Write(slab.StateRevision);
             Text(slab.MaterialProfile);
-            PartitionBudget(slab.Openings.Count, ref work);
+            EncodingPartitionBudget(slab.Openings.Count, ref work);
             Count(slab.Openings.Count);
             foreach (var opening in slab.Openings) Rectangle(opening);
             Size();
@@ -135,7 +141,7 @@ internal static class SpatialGeometryWireCodec
 
         void Count(int count)
         {
-            if (count < 0 || count > MaximumRecords) throw new InvalidDataException("Geometry record budget exceeded.");
+            if (count < 0 || count > MaximumRecords) throw new PayloadBudgetExceeded("Geometry record budget exceeded.");
             writer.Write(count);
         }
         void Text(string text)
@@ -153,7 +159,7 @@ internal static class SpatialGeometryWireCodec
         }
         void Size()
         {
-            if (stream.Length > MaximumBytes) throw new InvalidDataException("Geometry byte budget exceeded; split the authorized selection.");
+            if (stream.Length > MaximumBytes) throw new PayloadBudgetExceeded("Geometry byte budget exceeded; split the authorized selection.");
         }
     }
 

@@ -121,6 +121,63 @@ public sealed class SpatialGeometryStreamingTest : RobustIntegrationTest
         });
     }
 
+    [TestCase(true)]
+    [TestCase(false)]
+    public async Task OversizedFrameTransfersEveryPartBeforePublishingCollision(bool pvs)
+    {
+        await using var pair = await StartConnectedPair();
+        var (client, server) = pair;
+        await RunTicksSync(server, client, 10);
+        NetEntity frameNet = default, worldNet = default;
+        await server.WaitPost(() =>
+        {
+            server.CfgMan.SetCVar(CVars.NetPVS, pvs);
+            server.CfgMan.SetCVar(CVars.NetSpatialGeometryBytes, 1024 * 1024);
+            var world = server.System<SharedSpatialSystem>().CreateWorld();
+            var frame = CreateFrame(server.EntMan, world, 4500, compact: true);
+            frameNet = server.EntMan.GetNetEntity(frame);
+            worldNet = server.EntMan.GetNetEntity(world);
+            var selected = server.System<SharedGeometrySystem>().CaptureSnapshot(frame);
+            Assert.That(SpatialGeometryWireCodec.EncodeParts(selected, uid => server.EntMan.GetNetEntity(uid)).Count, Is.GreaterThan(1));
+            var viewer = server.EntMan.SpawnAttachedTo(null, world, RigidTransform3.Identity);
+            var session = server.PlayerMan.Sessions.First();
+            server.PlayerMan.SetAttachedEntity(session, viewer);
+            server.PlayerMan.JoinGame(session);
+        });
+        var waited = false;
+        for (var tick = 0; tick < 100; tick++)
+        {
+            await RunTicksSync(server, client, 1);
+            await client.WaitAssertion(() =>
+            {
+                var streaming = client.System<ClientStreaming>();
+                if (!client.EntMan.TryGetEntity(frameNet, out var frame) || !streaming.TryGetSnapshot(frame.Value, out var snapshot))
+                { waited = true; return; }
+                Assert.That(snapshot.Slabs.Count, Is.EqualTo(4500), "A frame must never expose only its first part.");
+                Assert.That(streaming.IsReady(client.EntMan.GetEntity(worldNet), new Box3(new Vector3(-1), new Vector3(1))), Is.True);
+            });
+        }
+        ulong sequence = 0;
+        await client.WaitAssertion(() =>
+        {
+            var streaming = client.System<ClientStreaming>();
+            Assert.That(waited, Is.True);
+            Assert.That(streaming.TryGetSnapshot(client.EntMan.GetEntity(frameNet), out var snapshot), Is.True);
+            Assert.That(snapshot!.Slabs.Count, Is.EqualTo(4500));
+            sequence = streaming.Sequence;
+            client.ResolveDependency<IClientNetManager>().ClientSendMessage(new MsgSpatialGeometryRequestBaseline { LastSequence = sequence });
+        });
+        await RunTicksSync(server, client, 100);
+        await client.WaitAssertion(() =>
+        {
+            var streaming = client.System<ClientStreaming>();
+            Assert.That(streaming.Sequence, Is.GreaterThan(sequence));
+            Assert.That(streaming.TryGetSnapshot(client.EntMan.GetEntity(frameNet), out var snapshot), Is.True);
+            Assert.That(snapshot!.Slabs.Count, Is.EqualTo(4500));
+            Assert.That(streaming.IsReady(client.EntMan.GetEntity(worldNet), new Box3(new Vector3(-1), new Vector3(1))), Is.True);
+        });
+    }
+
     [Test]
     public async Task DeniedSurfaceDoesNotLeakAndDoesNotCertifyEmptyCollision()
     {
@@ -218,7 +275,7 @@ public sealed class SpatialGeometryStreamingTest : RobustIntegrationTest
         });
     }
 
-    private static EntityUid CreateFrame(IEntityManager entities, EntityUid world, int slabs, EntityUid? source = null)
+    private static EntityUid CreateFrame(IEntityManager entities, EntityUid world, int slabs, EntityUid? source = null, bool compact = false)
     {
         var uid = entities.CreateEntityUninitialized(null, world, RigidTransform3.Identity);
         var layer = new LayerId(1);
@@ -226,9 +283,11 @@ public sealed class SpatialGeometryStreamingTest : RobustIntegrationTest
         entities.System<SharedSpatialSystem>().ConfigureInitialLayers((uid, frame),
             new Dictionary<LayerId, LayerDefinition> { [layer] = new(0, "Floor") });
         var geometry = entities.AddComponent<SpatialGeometryComponent>(uid);
+        var columns = compact ? 100 : 20;
+        var spacing = compact ? 0.1f : 0.5f;
         entities.System<SharedGeometrySystem>().ConfigureInitialGeometry((uid, geometry), Array.Empty<BoundarySegment>(),
             Enumerable.Range(0, slabs).Select(i => new SlabSurface(new SpatialSurfaceReference(uid, new SurfaceId((uint) i)),
-                layer, new Box2(i % 20 * 0.5f, i / 20 * 0.5f, i % 20 * 0.5f + 0.4f, i / 20 * 0.5f + 0.4f),
+                layer, new Box2(i % columns * spacing, i / columns * spacing, (i % columns + 0.8f) * spacing, (i / columns + 0.8f) * spacing),
                 0, 0.2f, materialProfile: slabs > 1 ? new string('m', 2000) : "metal", entity: source)));
         entities.InitializeAndStartEntity(uid);
         return uid;

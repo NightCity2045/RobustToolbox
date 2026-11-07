@@ -41,7 +41,7 @@ public sealed partial class SpatialGeometryStreamingSystem : EntitySystem
         public readonly SpatialGeometryManifest Manifest = manifest;
         public readonly List<Payload> Payloads = payloads;
         public readonly HashSet<EntityUid> Viewers = viewers;
-        public readonly HashSet<(NetEntity Frame, int Offset)> Outstanding = new();
+        public readonly HashSet<(NetEntity Frame, int Part, int Offset)> Outstanding = new();
         public int Frame;
         public int Offset;
         public TimeSpan Progress;
@@ -131,17 +131,21 @@ public sealed partial class SpatialGeometryStreamingSystem : EntitySystem
                 || Transform(frame).MapUid is not { } world) continue;
             var surfaces = group.Select(s => s.Surface).ToHashSet();
             var stamp = new SpatialGeometryStamp(geometry.WireGeneration, geometry.Revision);
-            var old = previous.FirstOrDefault(p => p.Frame == frame && p.World == world && p.Description.Stamp == stamp
-                && p.Surfaces.SetEquals(surfaces));
-            if (old != null) { payloads.Add(old); continue; }
+            var old = previous.Where(p => p.Frame == frame && p.World == world && p.Description.Stamp == stamp
+                && p.Surfaces.SetEquals(surfaces)).ToArray();
+            if (old.Length != 0) { payloads.AddRange(old); continue; }
             var snapshot = SpatialGeometryWireCodec.Select(_geometry.CaptureSnapshot(frame), surfaces);
             var sources = snapshot.Boundaries.Values.Select(b => b.Entity).Concat(snapshot.Slabs.Values.Select(s => s.Entity))
                 .Where(e => e != null).Select(e => e!.Value).Append(frame).Distinct().ToArray();
             if (!sources.All(allowed)) { selection.Complete = false; continue; }
-            var bytes = SpatialGeometryWireCodec.Encode(snapshot, uid => GetNetEntity(uid));
-            var description = new SpatialGeometryFrameManifest(GetNetEntity(world), GetNetEntity(frame), stamp,
-                Convert.ToHexString(SHA256.HashData(bytes)), bytes.Length);
-            payloads.Add(new Payload(frame, world, surfaces, sources, description, bytes));
+            var parts = SpatialGeometryWireCodec.EncodeParts(snapshot, uid => GetNetEntity(uid));
+            for (var part = 0; part < parts.Count; part++)
+            {
+                var bytes = parts[part];
+                var description = new SpatialGeometryFrameManifest(GetNetEntity(world), GetNetEntity(frame), stamp,
+                    Convert.ToHexString(SHA256.HashData(bytes)), bytes.Length, part, parts.Count);
+                payloads.Add(new Payload(frame, world, surfaces, sources, description, bytes));
+            }
         }
         return payloads;
     }
@@ -160,14 +164,14 @@ public sealed partial class SpatialGeometryStreamingSystem : EntitySystem
                 continue;
             }
             var length = Math.Min(SpatialGeometryReplica.FragmentSize, payload.Bytes.Length - transfer.Offset);
-            if (budget < length + 20) break;
+            if (budget < length + 24) break;
             _net.ServerSendMessage(new MsgSpatialGeometryFragment
             {
-                Sequence = transfer.Manifest.Sequence, Frame = payload.Description.Frame, Offset = transfer.Offset,
+                Sequence = transfer.Manifest.Sequence, Frame = payload.Description.Frame, Part = payload.Description.Part, Offset = transfer.Offset,
                 Data = payload.Bytes.AsSpan(transfer.Offset, length).ToArray()
             }, channel);
-            transfer.Outstanding.Add((payload.Description.Frame, transfer.Offset));
-            budget -= length + 20;
+            transfer.Outstanding.Add((payload.Description.Frame, payload.Description.Part, transfer.Offset));
+            budget -= length + 24;
             transfer.Offset += length;
             if (transfer.Offset == payload.Bytes.Length) { transfer.Frame++; transfer.Offset = 0; }
         }
@@ -176,7 +180,7 @@ public sealed partial class SpatialGeometryStreamingSystem : EntitySystem
     internal void OnProgress(MsgSpatialGeometryProgress message)
     {
         if (_sessions.TryGetValue(message.MsgChannel, out var state) && state.Pending is { } transfer
-            && transfer.Manifest.Sequence == message.Sequence && transfer.Outstanding.Remove((message.Frame, message.Offset)))
+            && transfer.Manifest.Sequence == message.Sequence && transfer.Outstanding.Remove((message.Frame, message.Part, message.Offset)))
             transfer.Progress = _timing.RealTime;
     }
 

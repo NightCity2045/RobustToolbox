@@ -27,17 +27,20 @@ public sealed class SpatialGeometryMessageTest
     [Test]
     public void AllMessagesRoundTripAndRejectEveryTruncationOrTrailingByte()
     {
+        var stamp = new SpatialGeometryStamp(Guid.NewGuid(), 3);
         var manifest = new SpatialGeometryManifest(2, 1, new GameTick(10), new[]
         {
             new SpatialGeometryFrameManifest(new NetEntity(1), new NetEntity(2),
-                new SpatialGeometryStamp(Guid.NewGuid(), 3), new string('A', 64), 100)
+                stamp, new string('A', 64), 100, 0, 2),
+            new SpatialGeometryFrameManifest(new NetEntity(1), new NetEntity(2),
+                stamp, new string('B', 64), 200, 1, 2)
         }, new[] { new SpatialGeometryCoverage(new NetEntity(1), new Box3(Vector3.Zero, Vector3.One)) });
         NetMessage[] messages =
         [
             new MsgSpatialGeometryManifest { Manifest = manifest },
-            new MsgSpatialGeometryFragment { Sequence = 2, Frame = new NetEntity(2), Offset = 0, Data = new byte[100] },
+            new MsgSpatialGeometryFragment { Sequence = 2, Frame = new NetEntity(2), Part = 17, Offset = 0, Data = new byte[100] },
             new MsgSpatialGeometryAck { Sequence = 2 },
-            new MsgSpatialGeometryProgress { Sequence = 2, Frame = new NetEntity(2), Offset = 0 },
+            new MsgSpatialGeometryProgress { Sequence = 2, Frame = new NetEntity(2), Part = 17, Offset = 0 },
             new MsgSpatialGeometryRequestBaseline { LastSequence = 1 }
         ];
         foreach (var message in messages)
@@ -60,6 +63,13 @@ public sealed class SpatialGeometryMessageTest
         {
             var bytes = Write(new MsgSpatialGeometryProgress { Sequence = 1, Frame = new NetEntity(1), Offset = offset });
             Assert.Throws<InvalidDataException>(() => Read(new MsgSpatialGeometryProgress(), bytes));
+        }
+        foreach (var part in new[] { -1, SpatialGeometryManifest.MaximumParts })
+        {
+            var bytes = Write(new MsgSpatialGeometryProgress { Sequence = 1, Frame = new NetEntity(1), Part = part });
+            Assert.Throws<InvalidDataException>(() => Read(new MsgSpatialGeometryProgress(), bytes));
+            bytes = Write(new MsgSpatialGeometryFragment { Sequence = 1, Frame = new NetEntity(1), Part = part, Data = new byte[1] });
+            Assert.Throws<InvalidDataException>(() => Read(new MsgSpatialGeometryFragment(), bytes));
         }
         var invalid = Write(new MsgSpatialGeometryFragment { Sequence = 0, Frame = new NetEntity(1), Data = new byte[1] });
         Assert.Throws<InvalidDataException>(() => Read(new MsgSpatialGeometryFragment(), invalid));

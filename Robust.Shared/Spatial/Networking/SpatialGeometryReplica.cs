@@ -10,12 +10,12 @@ using Robust.Shared.Timing;
 namespace Robust.Shared.Spatial.Networking;
 
 internal readonly record struct SpatialGeometryFrameManifest(NetEntity World, NetEntity Frame,
-    SpatialGeometryStamp Stamp, string Hash, int Length);
+    SpatialGeometryStamp Stamp, string Hash, int Length, int Part = 0, int Parts = 1);
 internal readonly record struct SpatialGeometryCoverage(NetEntity World, Box3 Bounds);
 
 internal sealed class SpatialGeometryManifest
 {
-    public const int MaximumFrames = 512;
+    public const int MaximumParts = 512;
     public const int MaximumViews = 32;
     public const int MaximumBytes = 32 * 1024 * 1024;
     public readonly ulong Sequence;
@@ -29,11 +29,18 @@ internal sealed class SpatialGeometryManifest
     {
         if (sequence == 0 || baseSequence >= sequence || tick == GameTick.Zero)
             throw new InvalidDataException("Invalid geometry baseline sequence/tick.");
-        var frameArray = frames.Take(MaximumFrames + 1).ToArray();
+        var frameArray = frames.Take(MaximumParts + 1).ToArray();
         var views = coverage.Take(MaximumViews + 1).ToArray();
-        if (frameArray.Length > MaximumFrames || views.Length > MaximumViews
-            || frameArray.Select(f => f.Frame).Distinct().Count() != frameArray.Length)
+        if (frameArray.Length > MaximumParts || views.Length > MaximumViews
+            || frameArray.Select(f => (f.Frame, f.Part)).Distinct().Count() != frameArray.Length)
             throw new InvalidDataException("Invalid geometry baseline cardinality.");
+        foreach (var group in frameArray.GroupBy(f => f.Frame))
+        {
+            var first = group.First();
+            if (first.Parts != group.Count() || group.Any(f => f.Parts != first.Parts || f.World != first.World
+                    || f.Stamp != first.Stamp || f.Part < 0 || f.Part >= first.Parts))
+                throw new InvalidDataException("Incomplete or inconsistent geometry frame parts.");
+        }
         long total = 0;
         foreach (var frame in frameArray)
         {
@@ -68,7 +75,8 @@ internal sealed class SpatialGeometryReplica
     private const int MaximumSolids = 262144;
     private SpatialGeometryManifest? _active;
     private Pending? _pending;
-    private Dictionary<NetEntity, CachedFrame> _frames = new();
+    private Dictionary<(NetEntity Frame, int Part), CachedFrame> _frames = new();
+    private Dictionary<NetEntity, SpatialGeometrySnapshot> _snapshots = new();
     private readonly HashSet<NetEntity> _invalid = new();
     private ulong _highestSequence;
     private GameTick _invalidationTick;
@@ -88,13 +96,13 @@ internal sealed class SpatialGeometryReplica
     private sealed class Pending(SpatialGeometryManifest manifest)
     {
         public readonly SpatialGeometryManifest Manifest = manifest;
-        public readonly Dictionary<NetEntity, Incoming> Frames = new();
+        public readonly Dictionary<(NetEntity Frame, int Part), Incoming> Frames = new();
     }
 
     public ulong Sequence => _active?.Sequence ?? 0;
     public bool NeedsBaseline => _needsBaseline;
     public bool HasPending => _pending != null;
-    public IEnumerable<NetEntity> KnownFrames => _frames.Keys;
+    public IEnumerable<NetEntity> KnownFrames => _snapshots.Keys;
 
     public bool Begin(SpatialGeometryManifest manifest)
     {
@@ -108,25 +116,25 @@ internal sealed class SpatialGeometryReplica
         var pending = new Pending(manifest);
         foreach (var description in manifest.Frames)
         {
-            _frames.TryGetValue(description.Frame, out var old);
+            _frames.TryGetValue((description.Frame, description.Part), out var old);
             // A full baseline transfers every byte again. Acknowledging cached
             // bytes early would strand the sender's fragment progress window.
             var cached = manifest.BaseSequence != 0 && old?.Description == description;
-            pending.Frames.Add(description.Frame,
+            pending.Frames.Add((description.Frame, description.Part),
                 new Incoming(description, cached ? old!.Bytes : new byte[description.Length], cached));
         }
         foreach (var (frame, old) in _frames)
             if (!pending.Frames.TryGetValue(frame, out var incoming) || incoming.Description != old.Description)
-                _invalid.Add(frame);
+                _invalid.Add(frame.Frame);
         _pending = pending;
         _needsBaseline = false;
         return true;
     }
 
-    public bool AddFragment(ulong sequence, NetEntity frame, int offset, ReadOnlySpan<byte> data)
+    public bool AddFragment(ulong sequence, NetEntity frame, int offset, ReadOnlySpan<byte> data, int partIndex = 0)
     {
         if (_pending is not { } pending || sequence != pending.Manifest.Sequence) return false;
-        if (!pending.Frames.TryGetValue(frame, out var incoming) || offset < 0 || offset % FragmentSize != 0
+        if (!pending.Frames.TryGetValue((frame, partIndex), out var incoming) || offset < 0 || offset % FragmentSize != 0
             || offset >= incoming.Bytes.Length || data.Length != Math.Min(FragmentSize, incoming.Bytes.Length - offset))
             throw Reject("Invalid geometry fragment bounds.");
         var part = offset / FragmentSize;
@@ -169,7 +177,7 @@ internal sealed class SpatialGeometryReplica
         }
         if (_pending is not { } pending || lastAuthoritativeTick < pending.Manifest.Tick
             || pending.Frames.Values.Any(f => f.Remaining != 0)) return SpatialGeometryApplyResult.Waiting;
-        var next = new Dictionary<NetEntity, CachedFrame>();
+        var next = new Dictionary<(NetEntity Frame, int Part), CachedFrame>();
         var solids = 0;
         // Resolve every dependency before any expensive geometry partitioning.
         // Waiting for a late parent must not rebuild earlier frames every tick.
@@ -186,7 +194,7 @@ internal sealed class SpatialGeometryReplica
                 return SpatialGeometryApplyResult.NeedBaseline;
             }
             SpatialGeometrySnapshot snapshot;
-            if (incoming.Cached && _frames.TryGetValue(description.Frame, out var old))
+            if (incoming.Cached && _frames.TryGetValue((description.Frame, description.Part), out var old))
                 snapshot = old.Snapshot;
             else
             {
@@ -201,11 +209,22 @@ internal sealed class SpatialGeometryReplica
                 throw new InvalidDataException("Geometry payload differs from its frame manifest.");
             solids = checked(solids + snapshot.SolidParts.Count);
             if (solids > MaximumSolids) throw new InvalidDataException("Geometry replica solid budget exceeded.");
-            next.Add(description.Frame, new CachedFrame(description, incoming.Bytes, snapshot, incoming.References!));
+            next.Add((description.Frame, description.Part), new CachedFrame(description, incoming.Bytes, snapshot, incoming.References!));
         }
         // Coverage may refer to an empty spatial world with no geometry frames.
         foreach (var view in pending.Manifest.Coverage)
             if (resolve(view.World, view.World) == null) return SpatialGeometryApplyResult.Waiting;
+        var snapshots = new Dictionary<NetEntity, SpatialGeometrySnapshot>();
+        foreach (var group in next.Values.GroupBy(f => f.Description.Frame))
+        {
+            // Coverage-only churn retains the same immutable merged snapshot.
+            if (_snapshots.TryGetValue(group.Key, out var old) && group.All(f =>
+                    pending.Frames[(f.Description.Frame, f.Description.Part)].Cached))
+                snapshots.Add(group.Key, old);
+            else snapshots.Add(group.Key, SpatialGeometryWireCodec.MergeParts(
+                group.OrderBy(f => f.Description.Part).Select(f => f.Snapshot).ToArray()));
+        }
+        _snapshots = snapshots;
         _frames = next;
         _active = pending.Manifest;
         _invalid.Clear();
@@ -223,22 +242,22 @@ internal sealed class SpatialGeometryReplica
 
     public void InvalidateKnown(NetEntity frame, GameTick tick)
     {
-        if (_frames.ContainsKey(frame) || _pending?.Frames.ContainsKey(frame) == true) Invalidate(frame, tick);
+        if (_snapshots.ContainsKey(frame) || _pending?.Frames.Keys.Any(k => k.Frame == frame) == true) Invalidate(frame, tick);
     }
 
     public void InvalidateUnresolved(Func<NetEntity, NetEntity, EntityUid?> resolve, GameTick tick)
     {
         foreach (var (frame, cached) in _frames)
-            if (resolve(cached.Description.World, frame) != cached.Snapshot.OwnerFrame
+            if (resolve(cached.Description.World, frame.Frame) != cached.Snapshot.OwnerFrame
                 || cached.References.Any(reference => resolve(cached.Description.World, reference) == null))
-                Invalidate(frame, tick);
+                Invalidate(frame.Frame, tick);
     }
 
     public bool TryGetSnapshot(NetEntity frame, out SpatialGeometrySnapshot? snapshot)
     {
-        if (!_needsBaseline && !_invalid.Contains(frame) && _frames.TryGetValue(frame, out var cached))
+        if (!_needsBaseline && !_invalid.Contains(frame) && _snapshots.TryGetValue(frame, out var cached))
         {
-            snapshot = cached.Snapshot;
+            snapshot = cached;
             return true;
         }
         snapshot = null;
@@ -286,6 +305,7 @@ internal sealed class SpatialGeometryReplica
         _pending = null;
         _active = null;
         _frames.Clear();
+        _snapshots.Clear();
         _invalid.Clear();
         _highestSequence = 0;
         _invalidationTick = default;

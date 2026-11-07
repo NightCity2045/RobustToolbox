@@ -41,7 +41,7 @@ internal sealed class MsgSpatialGeometryManifest : SpatialGeometryMessage
         var baseline = buffer.ReadUInt64();
         var tick = new GameTick(buffer.ReadUInt32());
         var frames = new List<SpatialGeometryFrameManifest>();
-        var count = Count(buffer, SpatialGeometryManifest.MaximumFrames, 68);
+        var count = Count(buffer, SpatialGeometryManifest.MaximumParts, 76);
         for (var i = 0; i < count; i++)
         {
             var world = new NetEntity(buffer.ReadInt32());
@@ -50,7 +50,9 @@ internal sealed class MsgSpatialGeometryManifest : SpatialGeometryMessage
             var revision = buffer.ReadUInt64();
             var hash = Convert.ToHexString(buffer.ReadBytes(32));
             var length = buffer.ReadInt32();
-            frames.Add(new SpatialGeometryFrameManifest(world, frame, new SpatialGeometryStamp(generation, revision), hash, length));
+            var part = buffer.ReadInt32();
+            var parts = buffer.ReadInt32();
+            frames.Add(new SpatialGeometryFrameManifest(world, frame, new SpatialGeometryStamp(generation, revision), hash, length, part, parts));
         }
         var coverage = new List<SpatialGeometryCoverage>();
         count = Count(buffer, SpatialGeometryManifest.MaximumViews, 28);
@@ -74,6 +76,7 @@ internal sealed class MsgSpatialGeometryManifest : SpatialGeometryMessage
             buffer.Write(frame.World.Id); buffer.Write(frame.Frame.Id);
             buffer.Write(frame.Stamp.Generation.ToByteArray()); buffer.Write(frame.Stamp.Revision);
             buffer.Write(Convert.FromHexString(frame.Hash)); buffer.Write(frame.Length);
+            buffer.Write(frame.Part); buffer.Write(frame.Parts);
         }
         buffer.Write(Manifest.Coverage.Count);
         foreach (var view in Manifest.Coverage)
@@ -84,21 +87,22 @@ internal sealed class MsgSpatialGeometryManifest : SpatialGeometryMessage
         }
     }
 
-    public override int EstimateBufferSize() => 28 + 68 * Manifest.Frames.Count + 28 * Manifest.Coverage.Count;
+    public override int EstimateBufferSize() => 28 + 76 * Manifest.Frames.Count + 28 * Manifest.Coverage.Count;
 }
 
 internal sealed class MsgSpatialGeometryFragment : SpatialGeometryMessage
 {
     public ulong Sequence;
     public NetEntity Frame;
+    public int Part;
     public int Offset;
     public byte[] Data = Array.Empty<byte>();
 
     public override void ReadFromBuffer(NetIncomingMessage buffer, IRobustSerializer serializer)
     {
-        Sequence = buffer.ReadUInt64(); Frame = new NetEntity(buffer.ReadInt32()); Offset = buffer.ReadInt32();
+        Sequence = buffer.ReadUInt64(); Frame = new NetEntity(buffer.ReadInt32()); Part = buffer.ReadInt32(); Offset = buffer.ReadInt32();
         var count = Count(buffer, SpatialGeometryReplica.FragmentSize, 1);
-        if (Sequence == 0 || !SpatialGeometryManifest.ValidNet(Frame) || Offset < 0
+        if (Sequence == 0 || !SpatialGeometryManifest.ValidNet(Frame) || Part < 0 || Part >= SpatialGeometryManifest.MaximumParts || Offset < 0
             || Offset >= SpatialGeometryWireCodec.MaximumBytes || Offset % SpatialGeometryReplica.FragmentSize != 0 || count == 0)
             throw new InvalidDataException("Invalid geometry fragment header.");
         Data = buffer.ReadBytes(count);
@@ -108,9 +112,9 @@ internal sealed class MsgSpatialGeometryFragment : SpatialGeometryMessage
     public override void WriteToBuffer(NetOutgoingMessage buffer, IRobustSerializer serializer)
     {
         if (Data.Length == 0 || Data.Length > SpatialGeometryReplica.FragmentSize) throw new InvalidDataException("Invalid fragment length.");
-        buffer.Write(Sequence); buffer.Write(Frame.Id); buffer.Write(Offset); buffer.Write(Data.Length); buffer.Write(Data);
+        buffer.Write(Sequence); buffer.Write(Frame.Id); buffer.Write(Part); buffer.Write(Offset); buffer.Write(Data.Length); buffer.Write(Data);
     }
-    public override int EstimateBufferSize() => 20 + Data.Length;
+    public override int EstimateBufferSize() => 24 + Data.Length;
 }
 
 internal sealed class MsgSpatialGeometryAck : SpatialGeometryMessage
@@ -129,18 +133,19 @@ internal sealed class MsgSpatialGeometryProgress : SpatialGeometryMessage
 {
     public ulong Sequence;
     public NetEntity Frame;
+    public int Part;
     public int Offset;
     public override void ReadFromBuffer(NetIncomingMessage buffer, IRobustSerializer serializer)
     {
-        Sequence = buffer.ReadUInt64(); Frame = new NetEntity(buffer.ReadInt32()); Offset = buffer.ReadInt32();
-        if (Sequence == 0 || !SpatialGeometryManifest.ValidNet(Frame) || Offset < 0
+        Sequence = buffer.ReadUInt64(); Frame = new NetEntity(buffer.ReadInt32()); Part = buffer.ReadInt32(); Offset = buffer.ReadInt32();
+        if (Sequence == 0 || !SpatialGeometryManifest.ValidNet(Frame) || Part < 0 || Part >= SpatialGeometryManifest.MaximumParts || Offset < 0
             || Offset >= SpatialGeometryWireCodec.MaximumBytes || Offset % SpatialGeometryReplica.FragmentSize != 0)
             throw new InvalidDataException("Invalid geometry progress acknowledgement.");
         End(buffer);
     }
     public override void WriteToBuffer(NetOutgoingMessage buffer, IRobustSerializer serializer)
     {
-        buffer.Write(Sequence); buffer.Write(Frame.Id); buffer.Write(Offset);
+        buffer.Write(Sequence); buffer.Write(Frame.Id); buffer.Write(Part); buffer.Write(Offset);
     }
 }
 

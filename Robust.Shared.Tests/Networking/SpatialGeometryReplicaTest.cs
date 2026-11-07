@@ -48,7 +48,40 @@ public sealed class SpatialGeometryReplicaTest
         if (reverse) offsets = offsets.Reverse();
         foreach (var offset in offsets)
             Assert.That(replica.AddFragment(sequence, payload.Description.Frame, offset,
-                payload.Bytes.AsSpan(offset, Math.Min(SpatialGeometryReplica.FragmentSize, payload.Bytes.Length - offset))), Is.True);
+                payload.Bytes.AsSpan(offset, Math.Min(SpatialGeometryReplica.FragmentSize, payload.Bytes.Length - offset)), payload.Description.Part), Is.True);
+    }
+
+    [Test]
+    public void FramePartsInstallTogetherAndCannotMixWorldsGenerationsOrIndices()
+    {
+        var a = Payload(1, 0);
+        var first = a.Description with { Parts = 2 };
+        var second = first with { Part = 1 };
+        // Identical slab dependencies are legal when large decorative coverings
+        // need several payloads; the complete frame contains the slab only once.
+        var replica = new SpatialGeometryReplica();
+        replica.Begin(Manifest(1, 0, 10, first, second));
+        Send(replica, 1, (second, a.Bytes), reverse: true);
+        Assert.That(replica.TryApply(new GameTick(10), Resolve, _ => first.Stamp), Is.EqualTo(SpatialGeometryApplyResult.Waiting));
+        Assert.That(replica.TryGetSnapshot(first.Frame, out _), Is.False);
+        Assert.That(replica.IsCovered(World, View), Is.False);
+        Send(replica, 1, (first, a.Bytes));
+        Assert.That(replica.TryApply(new GameTick(10), Resolve, _ => first.Stamp), Is.EqualTo(SpatialGeometryApplyResult.Applied));
+        Assert.That(replica.TryGetSnapshot(first.Frame, out var snapshot), Is.True);
+        Assert.That(snapshot!.Slabs.Count, Is.EqualTo(1));
+        replica.Begin(Manifest(2, 1, 11, first, second));
+        Assert.That(replica.TryApply(new GameTick(11), Resolve, _ => first.Stamp), Is.EqualTo(SpatialGeometryApplyResult.Applied));
+        replica.TryGetSnapshot(first.Frame, out var same);
+        Assert.That(same, Is.SameAs(snapshot));
+        Assert.Throws<InvalidDataException>(() => Manifest(3, 2, 12, first));
+        Assert.Throws<InvalidDataException>(() => Manifest(3, 2, 12, first, second with { Part = 2 }));
+        Assert.Throws<InvalidDataException>(() => Manifest(3, 2, 12, first, second with { Parts = 3 }));
+        Assert.Throws<InvalidDataException>(() => Manifest(3, 2, 12, first, second with { World = new NetEntity(98) }));
+        Assert.Throws<InvalidDataException>(() => Manifest(3, 2, 12, first,
+            second with { Stamp = new SpatialGeometryStamp(Guid.NewGuid(), 0) }));
+        replica.Invalidate(first.Frame, new GameTick(12));
+        Assert.That(replica.TryGetSnapshot(first.Frame, out _), Is.False);
+        Assert.That(replica.IsCovered(World, View), Is.False);
     }
 
     [Test]
