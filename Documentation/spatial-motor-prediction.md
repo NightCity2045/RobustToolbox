@@ -18,7 +18,12 @@ by skipping earlier inputs when collision data arrives late.
 
 The shared motor intent/settings, velocity, impulse and capsule resize APIs accept
 client writes only for an explicitly selected, active motor during prediction.
-They dirty the existing components so the ordinary authoritative reset restores
+`SharedSpatialPhysicsSystem.IsPredictingMotor(entity)` lets shared gameplay check
+this eligibility without depending on a client assembly. It returns false on the
+server, outside prediction and for unselected/inactive entities. Server gameplay
+still uses its ordinary authority and validates the action independently. The
+query does not certify received geometry or promise that a resize will succeed.
+The write APIs dirty the existing components so the ordinary authoritative reset restores
 them before replay. Resize uses the same foot-preserving capsule replacement and
 overlap clearance as the server; missing clearance returns false. Inputs can
 arrive between physics ticks as well as during replay. Gameplay must tolerate a

@@ -450,6 +450,9 @@ public sealed partial class SpatialMotorPredictionTest : RobustIntegrationTest
             if (_net.IsClient && !_timing.InPrediction) return;
             Inputs++;
             if (Reject || !TryGetEntity(input.Entity, out var uid) || args.SenderSession.AttachedEntity != uid) return;
+            Assert.That(_physics.IsPredictingMotor(uid.Value), Is.EqualTo(_net.IsClient));
+            Assert.That(_physics.IsPredictingMotor(Transform(uid.Value).MapUid!.Value), Is.False,
+                "Prediction selection must not authorize another entity in the same world.");
             _physics.SetMotorIntent((uid.Value, Comp<SpatialMotorComponent>(uid.Value)), new SpatialMotorIntent(input.Velocity, SpatialMotorMode.Walking));
             if (input.Resize)
             {
