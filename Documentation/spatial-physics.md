@@ -233,6 +233,10 @@ explicit collider queries carry that revision. Connections retain their canonica
 references and rebuild at the next fixed boundary. Container dormancy and pause
 remain in force. An ownership change cannot leave a connection without a dynamic
 participant. Map save/restore/clone and connected-client tests cover the revision.
+After an authoritative commit, `SpatialBodyDefinitionChanged` broadcasts the
+entity ID. Content can then refresh mass-dependent properties from the canonical
+definition. Client state restoration and prediction replay do not emit this
+authoritative notification.
 The caller supplies momentum policy and checks placement/permission; this operation
 alone is not a motor clearance check or a geometry transaction.
 

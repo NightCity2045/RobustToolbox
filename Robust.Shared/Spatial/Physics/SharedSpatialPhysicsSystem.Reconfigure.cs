@@ -6,8 +6,13 @@ using Robust.Shared.GameObjects;
 
 namespace Robust.Shared.Spatial.Physics;
 
+/// <summary>
+/// Broadcast after an authoritative body reconfiguration commits. Consumers can
+/// read the new canonical definition (for example its mass). This is not raised
+/// by client state restoration or prediction replay.
+/// </summary>
 [ByRefEvent]
-internal readonly record struct SpatialBodyDefinitionChanged(EntityUid Entity);
+public readonly record struct SpatialBodyDefinitionChanged(EntityUid Entity);
 
 public sealed partial class SharedSpatialPhysicsSystem
 {

@@ -3,6 +3,7 @@ using NUnit.Framework;
 using Robust.Shared.Containers;
 using Robust.Shared.GameObjects;
 using Robust.Shared.Maths;
+using Robust.Shared.Reflection;
 using Robust.Shared.Spatial;
 using Robust.Shared.Spatial.Physics;
 using Robust.UnitTesting.Server;
@@ -18,7 +19,8 @@ public sealed class SpatialBodyReconfigureTests
     [Test]
     public void ReplacementPublishesRevisionAndFailurePreservesTheOriginalBody()
     {
-        var sim = RobustServerSimulation.NewSimulation().InitializeInstance();
+        var sim = RobustServerSimulation.NewSimulation()
+            .RegisterEntitySystems(f => f.LoadExtraSystemType<DefinitionObserver>()).InitializeInstance();
         var entities = sim.Resolve<IEntityManager>();
         var physics = entities.System<SharedSpatialPhysicsSystem>();
         var world = entities.System<SharedSpatialSystem>().CreateWorld();
@@ -26,6 +28,11 @@ public sealed class SpatialBodyReconfigureTests
         var uid = SpatialPhysicsTests.SpawnBody(entities, world, new Vector3(0, 0, 3));
         Entity<SpatialBodyComponent> body = (uid, entities.GetComponent<SpatialBodyComponent>(uid));
         physics.ReconfigureBody(body, Sphere(0.5f), 0, Vector3.UnitX * 2, Vector3.Zero);
+        var observer = entities.System<DefinitionObserver>();
+        Assert.That(observer.Count, Is.EqualTo(1));
+        Assert.That(observer.Entity, Is.EqualTo(uid));
+        Assert.That(observer.Revision, Is.EqualTo(1));
+        Assert.That(observer.Mass, Is.EqualTo(2));
         Assert.That(body.Comp.DefinitionRevision, Is.EqualTo(1));
         Assert.That(body.Comp.LinearVelocity, Is.EqualTo(Vector3.UnitX * 2));
         var definition = body.Comp.Definition;
@@ -41,6 +48,7 @@ public sealed class SpatialBodyReconfigureTests
         Assert.That(body.Comp.LinearVelocity, Is.EqualTo(Vector3.UnitX * 2));
         Assert.That(physics.GetBodyCount(world), Is.EqualTo(1));
         Assert.That(backend.RayCast(new Vector3(0, 0, 6), -Vector3.UnitZ, 6, uint.MaxValue)!.Value.Body, Is.EqualTo(hit.Body));
+        Assert.That(observer.Count, Is.EqualTo(1), "Rejected replacements must not publish a committed definition.");
     }
 
     [Test]
@@ -97,5 +105,24 @@ public sealed class SpatialBodyReconfigureTests
         physics.Update(1f / 30);
         Assert.That(physics.IsConstraintActive(link), Is.True);
         Assert.That(physics.GetBodyCount(world), Is.EqualTo(2));
+    }
+    [Reflect(false)]
+    private sealed class DefinitionObserver : EntitySystem
+    {
+        public int Count;
+        public EntityUid Entity;
+        public ulong Revision;
+        public float Mass;
+
+        public override void Initialize() => SubscribeLocalEvent<SpatialBodyDefinitionChanged>(OnChanged);
+
+        private void OnChanged(ref SpatialBodyDefinitionChanged args)
+        {
+            var body = Comp<SpatialBodyComponent>(args.Entity);
+            Count++;
+            Entity = args.Entity;
+            Revision = body.DefinitionRevision;
+            Mass = body.Definition.Mass;
+        }
     }
 }
