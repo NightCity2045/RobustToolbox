@@ -43,13 +43,16 @@ selections still need chunk scheduling within these limits before full G7 closur
 
 `Robust.Client.Spatial.SpatialGeometryStreamingSystem` exposes read-only snapshots,
 their identity/currentness and `IsReady(world, bounds)`. False means unknown
-collision data. It must never be interpreted as an empty scene. Pending manifests
+collision data. It must never be interpreted as an empty scene. Pending geometry changes
 and newly received geometry stamps invalidate coverage; an older in-flight
 manifest cannot clear a newer frame invalidation. A newer manifest may explicitly
 certify that a removed/out-of-range frame no longer contributes to coverage.
 Reparenting across worlds immediately invalidates cached frames whose owners or
 semantic references no longer resolve in their recorded world, even with unchanged
 geometry stamps. A new-world manifest must establish coverage again.
+An update that only changes view bounds while reusing every received frame retains
+collision readiness inside the intersection of old and new coverage. It cannot
+certify newly requested space, retain revoked space or bypass a full baseline.
 These APIs do not themselves implement the prediction barrier or client physics.
 
 Authoritative transform presentation is captured separately at the completed

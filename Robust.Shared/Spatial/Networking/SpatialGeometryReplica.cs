@@ -247,10 +247,26 @@ internal sealed class SpatialGeometryReplica
 
     public bool IsCovered(NetEntity world, Box3 bounds)
     {
-        if (!bounds.IsValid || _needsBaseline || _pending != null || _invalid.Count != 0 || _active == null) return false;
-        foreach (var coverage in _active.Coverage)
-            if (coverage.World == world && coverage.Bounds.Contains(bounds.Min) && coverage.Bounds.Contains(bounds.Max)) return true;
-        return false;
+        if (!bounds.IsValid || _needsBaseline || _invalid.Count != 0 || _active == null) return false;
+        if (_pending is { } pending)
+        {
+            // Camera motion alone does not invalidate received collision. Keep
+            // only the intersection of the old and new authorized coverage,
+            // and only if every complete frame is byte-for-byte unchanged.
+            // Added/removed/replaced frames and full recovery baselines still
+            // require atomic installation at the matching authoritative tick.
+            if (pending.Manifest.BaseSequence != _active.Sequence || pending.Frames.Count != _frames.Count
+                || pending.Frames.Values.Any(frame => !frame.Cached)
+                || !Contains(pending.Manifest.Coverage)) return false;
+        }
+        return Contains(_active.Coverage);
+
+        bool Contains(IReadOnlyList<SpatialGeometryCoverage> views)
+        {
+            foreach (var coverage in views)
+                if (coverage.World == world && coverage.Bounds.Contains(bounds.Min) && coverage.Bounds.Contains(bounds.Max)) return true;
+            return false;
+        }
     }
 
     public void RequireBaseline()

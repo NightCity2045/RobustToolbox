@@ -104,6 +104,34 @@ public sealed class SpatialGeometryReplicaTest
     }
 
     [Test]
+    public void CoverageOnlyDeltaRetainsOnlyTheCertifiedIntersectionUntilItsTick()
+    {
+        var replica = new SpatialGeometryReplica();
+        var a = Payload(1, 0);
+        replica.Begin(Manifest(1, 0, 1, a.Description)); Send(replica, 1, a);
+        replica.TryApply(new GameTick(1), Resolve, _ => a.Description.Stamp);
+        var shifted = new Box3(new Vector3(-5, -10, -10), new Vector3(15, 10, 10));
+        replica.Begin(new SpatialGeometryManifest(2, 1, new GameTick(10), new[] { a.Description },
+            new[] { new SpatialGeometryCoverage(World, shifted) }));
+        Assert.That(replica.TryApply(new GameTick(9), Resolve, _ => a.Description.Stamp), Is.EqualTo(SpatialGeometryApplyResult.Waiting));
+        Assert.That(replica.HasPending, Is.True);
+        Assert.That(replica.Sequence, Is.EqualTo(1));
+        Assert.That(replica.IsCovered(World, new Box3(new Vector3(-4), new Vector3(4))), Is.True);
+        Assert.That(replica.IsCovered(World, View), Is.False, "The old view cannot retain revoked coverage.");
+        Assert.That(replica.IsCovered(World, shifted), Is.False, "The new view cannot certify unreceived coverage early.");
+        Assert.That(replica.TryApply(new GameTick(10), Resolve, _ => a.Description.Stamp), Is.EqualTo(SpatialGeometryApplyResult.Applied));
+        Assert.That(replica.IsCovered(World, shifted), Is.True);
+
+        replica.Begin(new SpatialGeometryManifest(3, 2, new GameTick(11), new[] { a.Description, Payload(2, 0).Description },
+            new[] { new SpatialGeometryCoverage(World, shifted) }));
+        Assert.That(replica.IsCovered(World, new Box3(new Vector3(-1), new Vector3(1))), Is.False,
+            "Adding an obstacle is not a coverage-only update.");
+        replica.Begin(new SpatialGeometryManifest(4, 0, new GameTick(12), new[] { a.Description },
+            new[] { new SpatialGeometryCoverage(World, shifted) }));
+        Assert.That(replica.IsCovered(World, shifted), Is.False, "A required full baseline cannot reuse prior certification.");
+    }
+
+    [Test]
     public void MissingBaselineAndRecreatedComponentCannotAcceptStaleGeometry()
     {
         var replica = new SpatialGeometryReplica();

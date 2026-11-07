@@ -15,7 +15,7 @@ cannot capture live predicted transforms merely by requesting a view.
 
 `TryGetScene` succeeds only when the authorized geometry replica certifies the
 entire requested box. Geometry revisions and component generations must match
-the captured state. Pending, invalidated, absent or over-budget collision returns
+the captured state. Pending collision changes, invalidated, absent or over-budget collision return
 no scene. It does not produce an empty scene on which a character could walk.
 Only a completed, certified scene may legitimately answer that a volume is free.
 
@@ -40,6 +40,12 @@ world transfer, deletion, entity flush and disconnect invalidate or dispose the
 view. Calls belong to the client thread, recursive query callbacks are rejected,
 and disposal during a callback defers backend release until the query exits and
 rejects its now-obsolete result. Content must dispose views when their users close.
+
+A pending update that only moves authorized coverage and reuses every complete
+geometry frame can retain queries inside the intersection of the old and new
+coverage. It neither exposes newly requested space early nor retains revoked
+space. Added, removed or changed geometry and full recovery baselines still block
+queries until atomic installation at the corresponding authoritative tick.
 
 These are queries over the client's authorized knowledge, not server hit decisions
 or permission to reveal hidden entities. Server gameplay validation remains
