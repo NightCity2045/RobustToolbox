@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using JetBrains.Annotations;
 using NUnit.Framework;
+using NUnit.Framework.Interfaces;
 using NUnit.Framework.Internal;
 using Robust.Client;
 using Robust.Shared;
@@ -32,6 +33,10 @@ public partial class TestPair<TServer, TClient>
 
     private async Task OnDirtyDispose()
     {
+        // NUnit warnings can replace the primary failure result during teardown.
+        // A failed test is expected to discard its pair; only warn when a
+        // successful test forgot to clean-return it.
+        var alreadyFailed = TestContext.CurrentContext.Result.Outcome.Status == TestStatus.Failed;
         var usageTime = Watch.Elapsed;
         Watch.Restart();
         await TestOut.WriteLineAsync($"{nameof(DisposeAsync)}: Test gave back pair {Id} in {usageTime.TotalMilliseconds} ms");
@@ -41,7 +46,8 @@ public partial class TestPair<TServer, TClient>
         ReportErrorLogs();
         // Test pairs should only dirty dispose if they are failing. If they are not failing, this probably happened
         // because someone forgot to clean-return the pair.
-        Assert.Warn("Test was dirty-disposed.");
+        if (!alreadyFailed)
+            Assert.Warn("Test was dirty-disposed.");
     }
 
     /// <summary>
