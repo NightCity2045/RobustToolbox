@@ -60,8 +60,19 @@ SLO claim. Read-only authoritative interpolation remains a separate mechanism;
 content view integration owns presentation of its controlled character and visual
 correction smoothing.
 
-Qualification covers actual connected client/server input replay and server
-rejection, walls, foot-preserving resize, impulse-driven jumping, no client landing
-consequences, unavailable coverage and bounded prediction. Backend tests include
-an excursion that returns inside the box before the tick ends. These deterministic
-tests do not substitute for the plan's RTT/jitter/loss and full gameplay gates.
+Qualification covers connected client/server input replay and server rejection,
+walls, foot-preserving resize, impulse-driven jumping, no client landing
+consequences, unavailable coverage, bounded prediction, dropped states, container
+dormancy and moving compound support. Backend tests include an excursion that
+returns inside the box before the tick ends.
+
+The same network scenario runs with nominal RTT profiles of 100 and 200 ms,
+10 ms one-way jitter and every fifth unreliable packet dropped, including input
+ACK/state traffic. The test transport delays the actual serialized messages on a
+shared virtual clock independent of prediction rewinds and machine speed.
+At 60 Hz it measures each delivered delay and checks the configured bounds plus
+one tick of dispatch quantization, verifies actual drops, and verifies reliable
+ordering and bounded queue cleanup. Reliable delivery remains the transport's
+contract. This is reproducible protocol qualification; OS UDP/retransmission,
+multiple-player gameplay, vehicle controls and idempotent content effects still
+need their respective integration gates.

@@ -107,13 +107,32 @@ public sealed partial class SpatialMotorPredictionTest : RobustIntegrationTest
         });
     }
 
-    [TestCase(true)]
-    [TestCase(false)]
-    public async Task InputsReplayAgainstKnownCollisionAndServerRejectionRestoresMotion(bool pvs)
+    [TestCase(true, 0)]
+    [TestCase(false, 0)]
+    [TestCase(true, 100)]
+    [TestCase(true, 200)]
+    [TestCase(false, 200)]
+    public async Task InputsReplayAgainstKnownCollisionAndServerRejectionRestoresMotion(bool pvs, int roundTripMilliseconds)
     {
         await using var pair = await StartConnectedPair();
         var (client, server) = pair;
-        await RunTicksSync(server, client, 10);
+        var impaired = false;
+        if (roundTripMilliseconds != 0)
+            await server.WaitPost(() => server.CfgMan.SetCVar(CVars.NetTickrate, 60));
+        async Task Step(int ticks)
+        {
+            for (var i = 0; i < ticks * (roundTripMilliseconds == 0 ? 1 : 2); i++)
+            {
+                if (impaired)
+                {
+                    var elapsed = TimeSpan.FromSeconds(1d / 60);
+                    await server.WaitPost(() => server.Resolve<IntegrationNetManager>().AdvanceNetwork(elapsed));
+                    await client.WaitPost(() => client.Resolve<IntegrationNetManager>().AdvanceNetwork(elapsed));
+                }
+                await RunTicksSync(server, client, 1);
+            }
+        }
+        await Step(10);
         NetEntity motorNet = default;
         EntityUid motor = default;
         await server.WaitPost(() =>
@@ -148,7 +167,15 @@ public sealed partial class SpatialMotorPredictionTest : RobustIntegrationTest
             server.PlayerMan.SetAttachedEntity(session, motor);
             server.PlayerMan.JoinGame(session);
         });
-        await RunTicksSync(server, client, 40);
+        if (roundTripMilliseconds != 0)
+        {
+            var conditions = new IntegrationNetworkConditions(TimeSpan.FromMilliseconds(roundTripMilliseconds / 2d),
+                TimeSpan.FromMilliseconds(10), DropEveryNthUnreliable: 5);
+            await server.WaitPost(() => server.Resolve<IntegrationNetManager>().ConfigureNetwork(conditions));
+            await client.WaitPost(() => client.Resolve<IntegrationNetManager>().ConfigureNetwork(conditions));
+            impaired = true;
+        }
+        await Step(40);
         SpatialMotorPrediction prediction = default!;
         EntityUid localMotor = default;
         await client.WaitAssertion(() =>
@@ -158,7 +185,7 @@ public sealed partial class SpatialMotorPredictionTest : RobustIntegrationTest
             prediction = client.System<SpatialMotorPredictionSystem>().PredictMotor(localMotor,
                 new Box3(new Vector3(-4), new Vector3(4)), new SpatialCollisionViewLimits(1000, 1000, 1000), 30);
         });
-        await RunTicksSync(server, client, 20);
+        await Step(20);
         await client.WaitAssertion(() =>
         {
             Assert.That(prediction.PredictedSteps, Is.GreaterThan(0));
@@ -171,7 +198,7 @@ public sealed partial class SpatialMotorPredictionTest : RobustIntegrationTest
         var peak = 0f;
         for (var i = 0; i < 30; i++)
         {
-            await RunTicksSync(server, client, 1);
+            await Step(1);
             await client.WaitPost(() => peak = Math.Max(peak, client.System<SharedTransformSystem>().GetWorldPose(localMotor).Position.X));
         }
         await client.WaitAssertion(() =>
@@ -187,7 +214,7 @@ public sealed partial class SpatialMotorPredictionTest : RobustIntegrationTest
             server.System<PredictionInputSystem>().Reject = false;
         });
         await client.WaitPost(() => client.EntMan.RaisePredictiveEvent(new MotorInput(motorNet, Vector3.UnitX * 4)));
-        await RunTicksSync(server, client, 100);
+        await Step(100);
         await client.WaitAssertion(() =>
         {
             var pose = client.System<SharedTransformSystem>().GetWorldPose(localMotor);
@@ -199,7 +226,7 @@ public sealed partial class SpatialMotorPredictionTest : RobustIntegrationTest
         await server.WaitAssertion(() => Assert.That(server.System<PredictionInputSystem>().Inputs, Is.EqualTo(2)));
 
         await client.WaitPost(() => client.EntMan.RaisePredictiveEvent(new MotorInput(motorNet, Vector3.Zero, resize: true)));
-        await RunTicksSync(server, client, 25);
+        await Step(25);
         await client.WaitAssertion(() =>
         {
             var body = client.EntMan.GetComponent<SpatialBodyComponent>(localMotor);
@@ -212,7 +239,7 @@ public sealed partial class SpatialMotorPredictionTest : RobustIntegrationTest
         var jumpPeak = 0f;
         for (var i = 0; i < 45; i++)
         {
-            await RunTicksSync(server, client, 1);
+            await Step(1);
             await client.WaitPost(() => jumpPeak = Math.Max(jumpPeak, client.System<SharedTransformSystem>().GetWorldPose(localMotor).Position.Z));
         }
         await client.WaitAssertion(() =>
@@ -235,7 +262,7 @@ public sealed partial class SpatialMotorPredictionTest : RobustIntegrationTest
         var unsafeDistance = 0f;
         for (var i = 0; i < 20; i++)
         {
-            await RunTicksSync(server, client, 1);
+            await Step(1);
             await client.WaitPost(() =>
             {
                 blocked |= prediction.Status == SpatialMotorPredictionStatus.OutsideCoverage;
@@ -254,11 +281,11 @@ public sealed partial class SpatialMotorPredictionTest : RobustIntegrationTest
             ((ClientGameStateManager) client.Resolve<IClientGameStateManager>()).DropStates = true;
             client.EntMan.RaisePredictiveEvent(new MotorInput(motorNet, -Vector3.UnitX * 2));
         });
-        await RunTicksSync(server, client, 20);
+        await Step(20);
         await client.WaitPost(() => ((ClientGameStateManager) client.Resolve<IClientGameStateManager>()).DropStates = false);
-        await RunTicksSync(server, client, 20);
+        await Step(20);
         await client.WaitPost(() => client.EntMan.RaisePredictiveEvent(new MotorInput(motorNet, Vector3.Zero)));
-        await RunTicksSync(server, client, 15);
+        await Step(15);
         Vector3 afterOutage = default;
         await server.WaitAssertion(() =>
         {
@@ -276,10 +303,10 @@ public sealed partial class SpatialMotorPredictionTest : RobustIntegrationTest
         {
             prediction.SetBounds(new Box3(new Vector3(-1000), new Vector3(1000)));
         });
-        await RunTicksSync(server, client, 8);
+        await Step(8);
         await client.WaitAssertion(() => Assert.That(prediction.Status, Is.EqualTo(SpatialMotorPredictionStatus.GeometryUnavailable)));
         await client.WaitPost(() => prediction.SetBounds(new Box3(new Vector3(-4), new Vector3(4))));
-        await RunTicksSync(server, client, 8);
+        await Step(8);
         await client.WaitAssertion(() => Assert.That(prediction.Status, Is.EqualTo(SpatialMotorPredictionStatus.Active)));
         await client.WaitPost(() =>
         {
@@ -287,7 +314,7 @@ public sealed partial class SpatialMotorPredictionTest : RobustIntegrationTest
             prediction = client.System<SpatialMotorPredictionSystem>().PredictMotor(localMotor,
                 new Box3(new Vector3(-4), new Vector3(4)), new SpatialCollisionViewLimits(1000, 1000, 1000), 1);
         });
-        await RunTicksSync(server, client, 10);
+        await Step(10);
         await client.WaitAssertion(() =>
         {
             Assert.That(prediction.Status, Is.EqualTo(SpatialMotorPredictionStatus.PredictionLimit));
@@ -300,7 +327,7 @@ public sealed partial class SpatialMotorPredictionTest : RobustIntegrationTest
             prediction = client.System<SpatialMotorPredictionSystem>().PredictMotor(localMotor,
                 new Box3(new Vector3(-4), new Vector3(4)), new SpatialCollisionViewLimits(1000, 1000, 1000), 30);
         });
-        await RunTicksSync(server, client, 10);
+        await Step(10);
         ContainerSlot container = default!;
         await server.WaitAssertion(() =>
         {
@@ -310,14 +337,14 @@ public sealed partial class SpatialMotorPredictionTest : RobustIntegrationTest
             container = containers.EnsureContainer<ContainerSlot>(holder, "prediction-test");
             Assert.That(containers.Insert(motor, container), Is.True);
         });
-        await RunTicksSync(server, client, 10);
+        await Step(10);
         ulong dormantSteps = 0;
         await client.WaitAssertion(() =>
         {
             Assert.That(prediction.Status, Is.EqualTo(SpatialMotorPredictionStatus.InactiveBody));
             dormantSteps = prediction.PredictedSteps;
         });
-        await RunTicksSync(server, client, 10);
+        await Step(10);
         await client.WaitAssertion(() => Assert.That(prediction.PredictedSteps, Is.EqualTo(dormantSteps)));
         await server.WaitAssertion(() =>
         {
@@ -325,10 +352,27 @@ public sealed partial class SpatialMotorPredictionTest : RobustIntegrationTest
             server.System<SharedTransformSystem>().SetWorldPose(motor, new RigidTransform3(new Vector3(0, 0, 0.8f), Quaternion.Identity));
             server.System<SharedSpatialPhysicsSystem>().SetVelocity((motor, server.EntMan.GetComponent<SpatialBodyComponent>(motor)), Vector3.Zero, Vector3.Zero);
         });
-        await RunTicksSync(server, client, 15);
+        await Step(15);
         await client.WaitAssertion(() => Assert.That(prediction.Status, Is.EqualTo(SpatialMotorPredictionStatus.Active)));
+        if (impaired)
+        {
+            void VerifyTransport(IntegrationNetManager network, bool expectLoss)
+            {
+                Assert.That(network.DeliveredDelayedPackets, Is.GreaterThan(50));
+                if (expectLoss) Assert.That(network.DroppedNetworkPackets, Is.GreaterThan(0));
+                Assert.That(network.MinimumDeliveredDelay!.Value.TotalMilliseconds, Is.GreaterThanOrEqualTo(roundTripMilliseconds / 2d - 10));
+                Assert.That(network.MaximumDeliveredDelay.TotalMilliseconds, Is.LessThanOrEqualTo(roundTripMilliseconds / 2d + 10 + 1000d / 60 + 0.001));
+                TestContext.Out.WriteLine($"RTT profile {roundTripMilliseconds}ms, one-way observed " +
+                    $"{network.MinimumDeliveredDelay.Value.TotalMilliseconds:F3}..{network.MaximumDeliveredDelay.TotalMilliseconds:F3}ms, " +
+                    $"delivered {network.DeliveredDelayedPackets}, dropped {network.DroppedNetworkPackets}");
+            }
+            await server.WaitAssertion(() => VerifyTransport(server.Resolve<IntegrationNetManager>(), true));
+            await client.WaitAssertion(() => VerifyTransport(client.Resolve<IntegrationNetManager>(), false));
+        }
         await DisconnectClient(server, client);
         await client.WaitAssertion(() => Assert.That(prediction.IsDisposed, Is.True));
+        await server.WaitAssertion(() => Assert.That(server.Resolve<IntegrationNetManager>().QueuedNetworkBytes, Is.Zero));
+        await client.WaitAssertion(() => Assert.That(client.Resolve<IntegrationNetManager>().QueuedNetworkBytes, Is.Zero));
     }
 
     public sealed partial class PredictionInputSystem : EntitySystem

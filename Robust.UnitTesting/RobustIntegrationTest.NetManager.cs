@@ -102,6 +102,7 @@ namespace Robust.UnitTesting
 
             public void Reset(string reason)
             {
+                ClearScheduledPackets();
                 foreach (var channel in _channels.Values.ToList())
                 {
                     channel.Disconnect(reason);
@@ -168,6 +169,7 @@ namespace Robust.UnitTesting
                             {
                                 if (!_channels.TryGetValue(data.Connection, out channel))
                                 {
+                                    ArrayPool<byte>.Shared.Return(data.PooledNetBuffer);
                                     continue;
                                 }
                             }
@@ -175,6 +177,7 @@ namespace Robust.UnitTesting
                             {
                                 if (ServerChannel == null || data.Connection != ServerChannel.ConnectionUid)
                                 {
+                                    ArrayPool<byte>.Shared.Return(data.PooledNetBuffer);
                                     continue;
                                 }
 
@@ -193,6 +196,7 @@ namespace Robust.UnitTesting
 
                         case DisconnectMessage disconnect:
                         {
+                            CancelScheduledPackets(disconnect.Connection);
                             if (_channels.TryGetValue(disconnect.Connection, out var channel))
                             {
                                 Disconnect?.Invoke(this, new NetDisconnectedArgs(channel, disconnect.Reason));
@@ -267,7 +271,7 @@ namespace Robust.UnitTesting
                 if (!channel.IsConnected)
                     throw new InvalidOperationException("Channel is not connected!");
 
-                channel.OtherChannel.TryWrite(SerializeNetMessage(message, channel.RemoteUid));
+                SendPacket(message, channel);
             }
 
             public void ServerSendToMany(NetMessage message, List<INetChannel> recipients)
@@ -384,7 +388,7 @@ namespace Robust.UnitTesting
                     throw new InvalidOperationException("Not connected.");
                 }
 
-                channel.OtherChannel.TryWrite(SerializeNetMessage(message, channel.RemoteUid));
+                SendPacket(message, channel);
             }
 
             public void DispatchLocalNetMessage(NetMessage message)
@@ -458,7 +462,7 @@ namespace Robust.UnitTesting
                 public LoginType AuthType => LoginType.GuestAssigned;
                 public TimeSpan RemoteTimeOffset => TimeSpan.Zero; // TODO: Fix this
                 public TimeSpan RemoteTime => _owner._gameTiming.RealTime + RemoteTimeOffset;
-                public short Ping => default;
+                public short Ping => (short) (_owner._conditions?.OneWayDelay.TotalMilliseconds * 2 ?? 0);
 
                 public IntegrationNetChannel(
                     IntegrationNetManager owner,
