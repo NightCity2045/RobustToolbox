@@ -34,7 +34,7 @@ public sealed partial class SharedSpatialPhysicsSystem
 
     public void SetMotorIntent(Entity<SpatialMotorComponent> motor, SpatialMotorIntent intent)
     {
-        RequireServer();
+        RequireMotorAuthority(motor);
         if (TerminatingOrDeleted(motor) || !motor.Comp.Running)
             throw new InvalidOperationException("Motor intent requires a running component.");
         intent.Validate();
@@ -44,7 +44,7 @@ public sealed partial class SharedSpatialPhysicsSystem
 
     public void SetMotorSettings(Entity<SpatialMotorComponent> motor, SpatialMotorSettings settings)
     {
-        RequireServer();
+        RequireMotorAuthority(motor);
         if (TerminatingOrDeleted(motor) || !motor.Comp.Running)
             throw new InvalidOperationException("Motor settings require a running component.");
         settings.Validate();
@@ -55,7 +55,9 @@ public sealed partial class SharedSpatialPhysicsSystem
     /// <summary>Change capsule dimensions while preserving its foot in the entity frame.</summary>
     public bool TryResizeMotor(Entity<SpatialMotorComponent> motor, float radius, float length, ulong expectedDefinitionRevision)
     {
-        RequireServer();
+        RequireMotorAuthority(motor);
+        if (!_net.IsServer)
+            return MotorPredictionDriver!.TryResize(motor, radius, length, expectedDefinitionRevision);
         if (TerminatingOrDeleted(motor) || !motor.Comp.Running || !TryComp<SpatialBodyComponent>(motor, out var body)
             || body.Definition.Owner != SpatialMotionOwner.Motor || body.DefinitionRevision != expectedDefinitionRevision
             || !_bindings.TryGetValue(motor, out var binding) || binding.Paused || MetaData(binding.World).EntityPaused)

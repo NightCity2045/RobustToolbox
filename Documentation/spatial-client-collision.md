@@ -43,8 +43,9 @@ rejects its now-obsolete result. Content must dispose views when their users clo
 
 These are queries over the client's authorized knowledge, not server hit decisions
 or permission to reveal hidden entities. Server gameplay validation remains
-mandatory. The view establishes a collision-consumption boundary; local motor
-prediction, input replay and reconciliation still require their own integration.
+mandatory. The view establishes a collision-consumption boundary. The separate
+[local motor driver](spatial-motor-prediction.md) consumes the same coherent
+capture under the existing game-state reset and input replay boundary.
 
 The network fixture checks both PVS modes, body/surface masks and witnesses,
 canonical pose preservation, entity/shape budgets, refusal of unauthorized bounds,

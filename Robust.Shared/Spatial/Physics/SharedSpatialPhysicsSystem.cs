@@ -15,7 +15,7 @@ namespace Robust.Shared.Spatial.Physics;
 /// <summary>
 /// Server integration of spatial bodies with the existing transform hierarchy.
 /// Backend state is committed into Transform; components own canonical velocities.
-/// Clients currently receive authoritative state, pending the prediction/motor path.
+/// The client motor driver reuses the backend under the existing reset/replay boundary.
 /// </summary>
 public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
 {
@@ -101,7 +101,7 @@ public sealed partial class SharedSpatialPhysicsSystem : EntitySystem
     /// <summary>Set world-space velocity at the entity origin, including for a dormant contained body.</summary>
     public void SetVelocity(Entity<SpatialBodyComponent> body, Vector3 linear, Vector3 angular)
     {
-        RequireServer();
+        RequireMotorAuthority(body);
         ValidateDefinition(body, body.Comp._definition, linear, angular);
         if (_bindings.TryGetValue(body, out var binding) && !binding.Paused)
         {

@@ -51,6 +51,7 @@ internal sealed partial class BepuSpatialPhysicsBackend
         min += pose.Position - expansion + Vector3.Min(Vector3.Zero, translation);
         max += pose.Position + expansion + Vector3.Max(Vector3.Zero, translation);
         // Reject overflow before entering BEPU's tree traversal.
+        _motorCoverage?.Check(new Box3(min, max));
         _ = new Box3(min, max);
         var candidates = new CandidateBodies(this, mask, ignored, new List<Entry>());
         _simulation.BroadPhase.GetOverlaps(min, max, ref candidates);

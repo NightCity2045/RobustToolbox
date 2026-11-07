@@ -29,9 +29,13 @@ public sealed partial class SpatialCollisionViewSystem : EntitySystem
     private readonly HashSet<SpatialCollisionView> _views = new();
 
     internal sealed record CapturedEntity(EntityUid Parent, RigidTransform3 Pose, bool Contained,
-        SpatialBodyDefinition? Body, ulong DefinitionRevision, SpatialGeometryStamp? Geometry);
+        SpatialBodyDefinition? Body, ulong DefinitionRevision, SpatialGeometryStamp? Geometry,
+        Vector3 LinearVelocity, Vector3 AngularVelocity, bool Paused, SpatialConstraintDefinition? Constraint);
     internal sealed record Capture(GameTick Tick, Dictionary<EntityUid, CapturedEntity> Entities,
-        Dictionary<EntityUid, RigidTransform3> Poses);
+        Dictionary<EntityUid, RigidTransform3> Poses, SpatialPhysicsSettings? Physics);
+    internal sealed record CapturedCollider(EntityUid Entity, SpatialBackendBodyDefinition Definition, RigidTransform3 Pose);
+    internal sealed record CapturedScene(Capture State, ulong GeometrySequence,
+        Dictionary<EntityUid, SpatialGeometrySnapshot> Geometry, List<CapturedCollider> Bodies);
 
     public override void Initialize()
     {
@@ -108,13 +112,16 @@ public sealed partial class SpatialCollisionViewSystem : EntitySystem
                 var pose = _transforms.GetWorldPose(transform);
                 captured.Add(uid, new CapturedEntity(transform.ParentUid, pose,
                     (metadata.Flags & MetaDataFlags.InContainer) != 0, body?.Definition.Copy(), body?.DefinitionRevision ?? 0,
-                    TryComp<SpatialFrameComponent>(uid, out var frame) ? frame.ReceivedGeometryStamp : null));
+                    TryComp<SpatialFrameComponent>(uid, out var frame) ? frame.ReceivedGeometryStamp : null,
+                    body?.LinearVelocity ?? Vector3.Zero, body?.AngularVelocity ?? Vector3.Zero, metadata.EntityPaused,
+                    TryComp<SpatialConstraintComponent>(uid, out var constraint) && constraint.HasDefinition ? constraint.Definition.Copy() : null));
                 poses.Add(uid, pose);
             }
             if (!valid || !captured.ContainsKey(view.World)) continue;
             foreach (var (uid, entity) in captured)
                 if (uid != view.World && !captured.ContainsKey(entity.Parent)) { valid = false; break; }
-            if (valid) view.Current = new Capture(args.AppliedState.ToSequence, captured, poses);
+            if (valid) view.Current = new Capture(args.AppliedState.ToSequence, captured, poses,
+                TryComp<SpatialPhysicsWorldComponent>(view.World, out var physics) ? physics.Settings : null);
         }
     }
 
@@ -123,6 +130,16 @@ public sealed partial class SpatialCollisionViewSystem : EntitySystem
             && _geometry.IsReady(view.World, view.Bounds);
 
     internal SpatialClientCollisionScene? Build(SpatialCollisionView view)
+    {
+        var data = CaptureScene(view);
+        if (data == null) return null;
+        var bodies = new List<(SpatialBackendBodyDefinition, RigidTransform3)>();
+        foreach (var body in data.Bodies) bodies.Add((body.Definition, body.Pose));
+        return new SpatialClientCollisionScene(view.World, data.State.Tick, data.GeometrySequence, view.Bounds,
+            data.State.Poses, data.Geometry, bodies, () => IsCurrent(view, data.State, data.GeometrySequence));
+    }
+
+    internal CapturedScene? CaptureScene(SpatialCollisionView view)
     {
         var capture = view.Current;
         if (capture == null || !_geometry.IsReady(view.World, view.Bounds)) return null;
@@ -136,7 +153,7 @@ public sealed partial class SpatialCollisionViewSystem : EntitySystem
                 return null;
             snapshots.Add(snapshot.OwnerFrame, snapshot);
         }
-        var bodies = new List<(SpatialBackendBodyDefinition Definition, RigidTransform3 Pose)>();
+        var bodies = new List<CapturedCollider>();
         var count = 0;
         var contained = new Dictionary<EntityUid, bool> { [view.World] = false };
         foreach (var (uid, entity) in capture.Entities)
@@ -160,7 +177,8 @@ public sealed partial class SpatialCollisionViewSystem : EntitySystem
                 }
             }
             if (parts.Count != 0)
-                bodies.Add((new SpatialBackendBodyDefinition(SpatialBackendMotion.Static, parts,
+                bodies.Add(new CapturedCollider(uid, new SpatialBackendBodyDefinition(SpatialBackendMotion.Static, parts,
+                    mass: entity.Body?.Mass ?? 1, material: entity.Body?.Material.ToBackend(),
                     collisionLayer: entity.Body?.CollisionLayer ?? 1, collisionMask: entity.Body?.CollisionMask ?? uint.MaxValue), entity.Pose));
 
             bool Add(SpatialBackendPart part)
@@ -172,8 +190,7 @@ public sealed partial class SpatialCollisionViewSystem : EntitySystem
             }
         }
         if (!IsCurrent(view, capture, sequence)) return null;
-        return new SpatialClientCollisionScene(view.World, capture.Tick, sequence, view.Bounds, capture.Poses, snapshots,
-            bodies, () => IsCurrent(view, capture, sequence));
+        return new CapturedScene(capture, sequence, snapshots, bodies);
 
         bool InContainer(EntityUid uid)
         {

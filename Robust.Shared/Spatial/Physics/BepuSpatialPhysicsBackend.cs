@@ -61,6 +61,7 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
         timestepper.BeforeCollisionDetection += ExpandRotatingCompoundBounds;
         _simulation = Simulation.Create(_pool, new Contacts(this), new Integrator(gravity),
             new SolveDescription(solverIterations, substeps), timestepper);
+        _simulation.Solver.SubstepEnded += _ => _motorCoverage?.Observe();
         SpatialSweepRegistration.Register(_simulation.NarrowPhase.SweepTaskRegistry);
     }
 
@@ -220,6 +221,7 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
         }
         UpdateConstraintAnchors(entry);
         _changedContactBodies.Add(id);
+        _motorCoverage?.Observe();
     }
 
     public void SetPaused(SpatialBackendBodyId id, bool paused)
@@ -246,7 +248,9 @@ internal sealed partial class BepuSpatialPhysicsBackend : ISpatialPhysicsBackend
         ThrowIfDisposed();
         if (!float.IsFinite(fixedDelta) || fixedDelta <= 0)
             throw new ArgumentOutOfRangeException(nameof(fixedDelta));
+        _motorCoverage?.Observe();
         _simulation.Timestep(fixedDelta);
+        _motorCoverage?.Observe();
         EndContacts();
     }
 

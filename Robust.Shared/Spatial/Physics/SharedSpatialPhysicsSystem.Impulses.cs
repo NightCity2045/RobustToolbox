@@ -18,7 +18,16 @@ public sealed partial class SharedSpatialPhysicsSystem
     /// </summary>
     public void ApplyImpulse(Entity<SpatialBodyComponent> body, Vector3 worldImpulse, Vector3 worldPoint)
     {
-        RequireServer();
+        RequireMotorAuthority(body);
+        if (!_net.IsServer)
+        {
+            if (!SpatialBackendBodyDefinition.Finite(worldImpulse) || !SpatialBackendBodyDefinition.Finite(worldPoint))
+                throw new ArgumentException("An impulse requires a finite point and momentum.");
+            // The selected capsule has locked rotation. Replay writes the same
+            // canonical velocity and never emits authoritative impact events.
+            SetVelocity(body, body.Comp.LinearVelocity + worldImpulse / body.Comp.Definition.Mass, Vector3.Zero);
+            return;
+        }
         if (body.Comp.Definition.Owner == SpatialMotionOwner.AnchoredCompoundChild)
         {
             if (!_compoundOwners.TryGetValue(body, out var root) || !TryComp<SpatialBodyComponent>(root, out var owner))

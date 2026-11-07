@@ -614,6 +614,7 @@ namespace Robust.Client.GameStates
 
             // This is terrible, and I hate it. This also needs to run even when prediction is disabled.
             _entitySystemManager.GetEntitySystem<TransformSystem>().Reset();
+            _entitySystemManager.GetEntitySystem<Spatial.SpatialMotorPredictionSystem>().ResetPredictedSolvers();
 
             if (!PredictionNeedsResetting)
                 return;
