@@ -23,14 +23,16 @@ namespace Robust.UnitTesting.Shared.GameState;
 [TestFixture]
 public sealed partial class SpatialMotorPredictionTest : RobustIntegrationTest
 {
-    [Test]
-    public async Task PassengerPredictionUsesTheMovingCompoundSupportOnce()
+    [TestCase(null)]
+    [TestCase(SpatialConstraintKind.Point)]
+    [TestCase(SpatialConstraintKind.DistanceRange)]
+    public async Task PassengerPredictionUsesTheMovingCompoundSupportOnce(SpatialConstraintKind? tether)
     {
         await using var pair = await StartConnectedPair();
         var (client, server) = pair;
         await RunTicksSync(server, client, 10);
         NetEntity motorNet = default, deckNet = default;
-        EntityUid motor = default;
+        EntityUid motor = default, connection = default;
         await server.WaitPost(() =>
         {
             var world = server.System<SharedSpatialSystem>().CreateWorld();
@@ -60,12 +62,21 @@ public sealed partial class SpatialMotorPredictionTest : RobustIntegrationTest
             motor = server.EntMan.CreateEntityUninitialized(null, carrier,
                 new RigidTransform3(new Vector3(2, 0, 1.4f), Quaternion.Identity));
             var controller = server.EntMan.AddComponent<SpatialMotorComponent>(motor);
-            physics.ConfigureInitialMotor((motor, controller), SpatialMotorSettings.Default);
+            physics.ConfigureInitialMotor((motor, controller), SpatialMotorSettings.Default,
+                new SpatialMotorIntent(tether == null ? Vector3.Zero : Vector3.UnitY * 2, SpatialMotorMode.Walking));
             var body = server.EntMan.AddComponent<SpatialBodyComponent>(motor);
             physics.ConfigureInitialBody((motor, body), new SpatialBodyDefinition(SpatialMotionOwner.Motor,
                 new[] { new SpatialColliderDefinition(new SpatialCapsuleShape(0.3f, 1), RigidTransform3.Identity) },
                 mass: 80, collisionMask: 2));
             server.EntMan.InitializeAndStartEntity(motor);
+            if (tether is { } kind)
+            {
+                connection = server.EntMan.CreateEntityUninitialized(null, world, RigidTransform3.Identity);
+                var constraint = server.EntMan.AddComponent<SpatialConstraintComponent>(connection);
+                physics.ConfigureInitialConstraint((connection, constraint), new SpatialConstraintDefinition(deck, motor, kind,
+                    localAnchorA: new Vector3(2, 0, 0.8f), maximumDistance: 0.35f, collideConnected: true));
+                server.EntMan.InitializeAndStartEntity(connection);
+            }
             motorNet = server.EntMan.GetNetEntity(motor); deckNet = server.EntMan.GetNetEntity(deck);
             var session = server.PlayerMan.Sessions.First();
             server.PlayerMan.SetAttachedEntity(session, motor); server.PlayerMan.JoinGame(session);
@@ -86,6 +97,7 @@ public sealed partial class SpatialMotorPredictionTest : RobustIntegrationTest
         {
             serverPosition = server.System<SharedTransformSystem>().GetWorldPose(motor).Position;
             Assert.That(server.EntMan.GetComponent<SpatialMotorComponent>(motor).Support, Is.Not.Null);
+            if (tether != null) Assert.That(server.System<SharedSpatialPhysicsSystem>().IsConstraintActive(connection), Is.True);
         });
         await client.WaitAssertion(() =>
         {
@@ -103,6 +115,40 @@ public sealed partial class SpatialMotorPredictionTest : RobustIntegrationTest
             var localCarrier = client.EntMan.GetComponent<TransformComponent>(localMotor).ParentUid;
             Assert.That(client.System<SharedTransformSystem>().GetWorldPose(localCarrier),
                 Is.EqualTo(prediction.Capture!.Entities[localCarrier].Pose), "Remote proxy motion must not write canonical parent poses.");
+        });
+        await client.WaitPost(() => client.EntMan.RaisePredictiveEvent(new MotorInput(motorNet, Vector3.Zero, resize: true)));
+        var sawPredictedReplacement = false;
+        for (var i = 0; i < 20; i++)
+        {
+            await RunTicksSync(server, client, 1);
+            await client.WaitPost(() =>
+            {
+                if (prediction.Solver is { DefinitionRevision: 1 } solver
+                    && solver.Scene.State.Entities[localMotor].DefinitionRevision == 0)
+                {
+                    sawPredictedReplacement = true;
+                    Assert.That(solver.Backend.ConstraintCount, Is.EqualTo(tether == null ? 0 : 1));
+                }
+            });
+        }
+        await client.WaitAssertion(() =>
+        {
+            Assert.That(prediction.Status, Is.EqualTo(SpatialMotorPredictionStatus.Active));
+            Assert.That(client.EntMan.GetComponent<SpatialBodyComponent>(localMotor).DefinitionRevision, Is.EqualTo(1));
+            Assert.That(sawPredictedReplacement, Is.True, "Exercise replacement before its authoritative acknowledgement.");
+            if (tether != null)
+            {
+                var solver = prediction.Solver!;
+                Assert.That(solver.Backend.ConstraintCount, Is.EqualTo(1), "Capsule replacement must restore its prediction constraint.");
+                // The solver uses an extrapolated moving root, so compare its
+                // own resolved attachment rather than a stale remote ECS pose.
+                var root = client.EntMan.GetComponent<TransformComponent>(localMotor).ParentUid;
+                var rootPose = solver.Backend.GetState(solver.BodyIds[root]).Pose;
+                var relativeDeck = solver.Scene.State.Entities[client.EntMan.GetEntity(deckNet)].LocalPose;
+                var attachment = rootPose.Compose(relativeDeck).TransformPoint(new Vector3(2, 0, 0.8f));
+                var origin = solver.Backend.GetState(solver.Motor).Pose.Position;
+                Assert.That(Vector3.Distance(origin, attachment), Is.LessThan(tether == SpatialConstraintKind.Point ? 0.025f : 0.38f));
+            }
             prediction.Dispose();
         });
     }

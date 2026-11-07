@@ -193,7 +193,8 @@ public sealed partial class SpatialMotorPredictionSystem : EntitySystem, ISpatia
         if (!scene.Bodies.Any(b => b.Entity == prediction.Entity)
             || capture.Entities[prediction.World].Paused || capture.Entities[prediction.Entity].Paused)
         { prediction.Block(SpatialMotorPredictionStatus.InactiveBody); return false; }
-        if (capture.Entities.Values.Any(e => e.Constraint is { } c && (c.BodyA == prediction.Entity || c.BodyB == prediction.Entity)))
+        if (capture.Entities.Values.Any(e => !e.Paused && e.Constraint is { Kind: SpatialConstraintKind.Fixed } c
+                && (c.BodyA == prediction.Entity || c.BodyB == prediction.Entity)))
         { prediction.Block(SpatialMotorPredictionStatus.ConstrainedBody); return false; }
         if (!PredictionSolver.TryCreate(scene, prediction.Entity, out var solver))
         { prediction.Block(SpatialMotorPredictionStatus.GeometryUnavailable); return false; }
@@ -209,6 +210,8 @@ public sealed partial class SpatialMotorPredictionSystem : EntitySystem, ISpatia
             solver.Backend.RemoveBody(solver.Motor);
             solver.Motor = solver.Backend.AddBody(MotorDefinition(uid, body.Definition, body.DefinitionRevision), state);
             solver.DefinitionRevision = body.DefinitionRevision;
+            solver.BodyIds[uid] = solver.Motor;
+            solver.BindConstraints();
         }
         else solver.Backend.SetState(solver.Motor, state);
     }
@@ -247,6 +250,10 @@ public sealed partial class SpatialMotorPredictionSystem : EntitySystem, ISpatia
     {
         public readonly SpatialCollisionViewSystem.CapturedScene Scene;
         public readonly BepuSpatialPhysicsBackend Backend;
+        public readonly Dictionary<EntityUid, SpatialBackendBodyId> BodyIds = new();
+        private readonly Dictionary<EntityUid, EntityUid> _roots;
+        private readonly List<SpatialConstraintDefinition> _constraints;
+        private readonly List<SpatialBackendConstraintId> _constraintIds = new();
         public SpatialBackendBodyId Motor;
         public ulong DefinitionRevision;
         public GameTick Tick;
@@ -274,14 +281,21 @@ public sealed partial class SpatialMotorPredictionSystem : EntitySystem, ISpatia
                     root = parent.Parent;
                 }
             }
-            solver = new PredictionSolver(scene, motor, records, roots);
+            var constraints = scene.State.Entities.Values.Where(e => !e.Paused && e.Constraint is { } c
+                && (c.BodyA == motor || c.BodyB == motor)).Select(e => e.Constraint!).ToList();
+            foreach (var constraint in constraints)
+                if (!records.ContainsKey(roots.GetValueOrDefault(constraint.BodyA, constraint.BodyA))
+                    || !records.ContainsKey(roots.GetValueOrDefault(constraint.BodyB, constraint.BodyB))) return false;
+            solver = new PredictionSolver(scene, motor, records, roots, constraints);
             return true;
         }
 
         private PredictionSolver(SpatialCollisionViewSystem.CapturedScene scene, EntityUid motor,
-            Dictionary<EntityUid, SpatialCollisionViewSystem.CapturedCollider> records, Dictionary<EntityUid, EntityUid> roots)
+            Dictionary<EntityUid, SpatialCollisionViewSystem.CapturedCollider> records, Dictionary<EntityUid, EntityUid> roots,
+            List<SpatialConstraintDefinition> constraints)
         {
             Scene = scene; Tick = scene.State.Tick;
+            _roots = roots; _constraints = constraints;
             var settings = scene.State.Physics!.Value;
             Backend = new BepuSpatialPhysicsBackend(settings.Gravity, settings.Substeps, settings.SolverIterations);
             try
@@ -291,7 +305,7 @@ public sealed partial class SpatialMotorPredictionSystem : EntitySystem, ISpatia
                 {
                     var collider = records[uid];
                     if (!children.TryGetValue(root, out var group)) children.Add(root, group = new());
-                    group.Add(new SpatialCompoundMember(collider.Entity, records[root].Pose.Inverse().Compose(collider.Pose), collider.Definition));
+                    group.Add(new SpatialCompoundMember(collider.Entity, RelativePose(collider.Entity, root), collider.Definition));
                 }
                 foreach (var collider in scene.Bodies)
                 {
@@ -306,10 +320,45 @@ public sealed partial class SpatialMotorPredictionSystem : EntitySystem, ISpatia
                     if (children.TryGetValue(collider.Entity, out var group)) definition = SpatialCompoundLayout.Compose(collider.Entity, definition, group);
                     var id = Backend.AddBody(definition, new SpatialBackendState(collider.Pose,
                         moving || own ? entity.LinearVelocity : Vector3.Zero, moving || own ? entity.AngularVelocity : Vector3.Zero));
+                    BodyIds.Add(collider.Entity, id);
                     if (own) { Motor = id; DefinitionRevision = entity.DefinitionRevision; }
                 }
+                BindConstraints();
             }
             catch { Backend.Dispose(); throw; }
+        }
+
+        public void BindConstraints()
+        {
+            foreach (var id in _constraintIds)
+                if (Backend.HasConstraint(id)) Backend.RemoveConstraint(id);
+            _constraintIds.Clear();
+            foreach (var definition in _constraints)
+            {
+                var rootA = _roots.GetValueOrDefault(definition.BodyA, definition.BodyA);
+                var rootB = _roots.GetValueOrDefault(definition.BodyB, definition.BodyB);
+                var relativeA = RelativePose(definition.BodyA, rootA);
+                var relativeB = RelativePose(definition.BodyB, rootB);
+                var resolved = definition.ToBackend(BodyIds[rootA], BodyIds[rootB]) with
+                {
+                    LocalAnchorA = relativeA.TransformPoint(definition.LocalAnchorA),
+                    LocalAnchorB = relativeB.TransformPoint(definition.LocalAnchorB),
+                    RelativePose = relativeA.Compose(definition.RelativePose).Compose(relativeB.Inverse())
+                };
+                _constraintIds.Add(Backend.AddConstraint(resolved));
+            }
+        }
+
+        private RigidTransform3 RelativePose(EntityUid entity, EntityUid root)
+        {
+            var pose = RigidTransform3.Identity;
+            while (entity != root)
+            {
+                var frame = Scene.State.Entities[entity];
+                pose = frame.LocalPose.Compose(pose);
+                entity = frame.Parent;
+            }
+            return pose;
         }
 
         public void Dispose() => Backend.Dispose();

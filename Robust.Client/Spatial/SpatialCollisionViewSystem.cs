@@ -28,7 +28,7 @@ public sealed partial class SpatialCollisionViewSystem : EntitySystem
     [Dependency] private SpatialGeometryStreamingSystem _geometry = default!;
     private readonly HashSet<SpatialCollisionView> _views = new();
 
-    internal sealed record CapturedEntity(EntityUid Parent, RigidTransform3 Pose, bool Contained,
+    internal sealed record CapturedEntity(EntityUid Parent, RigidTransform3 Pose, RigidTransform3 LocalPose, bool Contained,
         SpatialBodyDefinition? Body, ulong DefinitionRevision, SpatialGeometryStamp? Geometry,
         Vector3 LinearVelocity, Vector3 AngularVelocity, bool Paused, SpatialConstraintDefinition? Constraint);
     internal sealed record Capture(GameTick Tick, Dictionary<EntityUid, CapturedEntity> Entities,
@@ -110,7 +110,7 @@ public sealed partial class SpatialCollisionViewSystem : EntitySystem
                     shapes += body.Definition.Colliders.Count;
                 }
                 var pose = _transforms.GetWorldPose(transform);
-                captured.Add(uid, new CapturedEntity(transform.ParentUid, pose,
+                captured.Add(uid, new CapturedEntity(transform.ParentUid, pose, transform.LocalPose,
                     (metadata.Flags & MetaDataFlags.InContainer) != 0, body?.Definition.Copy(), body?.DefinitionRevision ?? 0,
                     TryComp<SpatialFrameComponent>(uid, out var frame) ? frame.ReceivedGeometryStamp : null,
                     body?.LinearVelocity ?? Vector3.Zero, body?.AngularVelocity ?? Vector3.Zero, metadata.EntityPaused,

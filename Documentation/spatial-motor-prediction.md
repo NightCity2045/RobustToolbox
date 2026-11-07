@@ -38,10 +38,14 @@ source identities, materials, masks and mass distribution. Rotation therefore
 supplies support velocity at the contact point, including `omega cross r`, without
 moving canonical remote entities or carrying the passenger twice. Remote proxies
 do not predict other players' inputs or remote dynamic reactions. These are
-server-corrected approximations, not lockstep physics. A motor attached by a
-constraint currently waits for authority; this path does not silently drop its
-constraint and let it fall or move freely. Piloted dynamic-body prediction is a
-separate remaining integration.
+server-corrected approximations, not lockstep physics. Point connections and
+distance limits attached to the motor use the captured constraint definitions.
+Anchors on compound children resolve through their captured local hierarchy to
+the physical root. Capsule replacement restores these connections before the
+next step. Missing endpoints prevent prediction rather than dropping a constraint.
+Fixed connections still wait for authority: a rotation-locked motor and a remote
+kinematic proxy cannot supply the angular inertia that a weld requires. Piloted
+dynamic-body prediction is a separate remaining integration.
 
 Unknown collision never becomes free space. The complete collision view must be
 ready at the captured revision. Every motor sweep/overlap, support search and
